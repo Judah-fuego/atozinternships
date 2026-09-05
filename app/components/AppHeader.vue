@@ -4,7 +4,7 @@
       class="brand"
       to="/"
     >
-      atozinternships.com
+      atoz
     </NuxtLink>
     <nav
       class="nav"

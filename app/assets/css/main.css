@@ -26,7 +26,7 @@ html,
 .place-tip,
 .apply-pop,
 .folder-card-pop,
-.folder-tabs {
+.folder-tabs-list {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -38,7 +38,7 @@ html::-webkit-scrollbar,
 .place-tip::-webkit-scrollbar,
 .apply-pop::-webkit-scrollbar,
 .folder-card-pop::-webkit-scrollbar,
-.folder-tabs::-webkit-scrollbar {
+.folder-tabs-list::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
@@ -1240,15 +1240,54 @@ input[type="search"]::-webkit-search-results-decoration {
   align-items: center;
   gap: 0.2rem;
   min-width: 0;
-  overflow-x: auto;
 }
 
-.folders-page .folder-tabs {
-  margin: 0 0 0.9rem;
+.folder-tabs-list {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .folder-toolbar .folder-tabs {
   flex: 1 1 auto;
+}
+
+.folder-tab-add {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.folder-tab-add .apply-pop {
+  left: 0;
+  right: auto;
+  z-index: 31;
+}
+
+.folder-tab-add .apply-choice:last-child {
+  border-bottom: 0;
+}
+
+.folder-tab-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.folder-tab-add-btn:hover,
+.folder-tab-add-btn[aria-expanded="true"] {
+  color: var(--ink);
 }
 
 .folder-tab {
@@ -1474,6 +1513,8 @@ input[type="search"]::-webkit-search-results-decoration {
   .filters-layer {
     position: fixed;
     inset: 0;
+    width: 100%;
+    height: 100%;
     max-height: none;
     overflow: hidden;
     z-index: 40;
@@ -1574,8 +1615,15 @@ input[type="search"]::-webkit-search-results-decoration {
   }
   .mark,
   .mark-fallback { grid-area: mark; }
-  .company { grid-area: company; }
-  .role { grid-area: role; }
+  .company {
+    grid-area: company;
+    min-width: 0;
+  }
+  .role {
+    display: block;
+    grid-area: role;
+    min-width: 0;
+  }
   .apply-menu { grid-area: apply; }
   .save-menu { grid-area: save; }
   .meta {

@@ -8,6 +8,8 @@ const props = defineProps<{
 const router = useRouter()
 const saved = useSaved()
 const tabs = useFolderTabs()
+const picking = ref(false)
+const pickWrap = ref<HTMLElement | null>(null)
 
 watch(() => saved.store.value.folders, () => {
   tabs.prune(tabs.validIds())
@@ -24,6 +26,20 @@ const items = computed(() => {
   })
 })
 
+const closed = computed(() => {
+  const open = new Set(tabs.openIds.value)
+  const next = []
+  if (!open.has(ALL_FOLDER_ID)) {
+    next.push({ id: ALL_FOLDER_ID, name: 'All saved' })
+  }
+  for (const folder of saved.store.value.folders) {
+    if (!open.has(folder.id)) {
+      next.push({ id: folder.id, name: folder.name })
+    }
+  }
+  return next
+})
+
 function closeTab(id: string) {
   tabs.close(id)
   const href = tabs.nextHref(id, props.activeId)
@@ -31,6 +47,33 @@ function closeTab(id: string) {
     void router.push(href)
   }
 }
+
+function openFolder(id: string) {
+  picking.value = false
+  void router.push(tabs.hrefFor(id))
+}
+
+function onDocumentClick(event: MouseEvent) {
+  if (picking.value && pickWrap.value && !pickWrap.value.contains(event.target as Node)) {
+    picking.value = false
+  }
+}
+
+function onKey(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    picking.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onDocumentClick)
+  document.addEventListener('keydown', onKey)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onDocumentClick)
+  document.removeEventListener('keydown', onKey)
+})
 </script>
 
 <template>
@@ -39,26 +82,61 @@ function closeTab(id: string) {
     class="folder-tabs"
     aria-label="Open folders"
   >
+    <div class="folder-tabs-list">
+      <div
+        v-for="tab in items"
+        :key="tab.id"
+        class="folder-tab"
+        :class="{ 'is-active': tab.id === activeId }"
+      >
+        <NuxtLink
+          class="folder-tab-link"
+          :to="tab.href"
+        >
+          {{ tab.name }}
+        </NuxtLink>
+        <button
+          class="folder-tab-close"
+          type="button"
+          :aria-label="`Close ${tab.name}`"
+          @click="closeTab(tab.id)"
+        >
+          ×
+        </button>
+      </div>
+    </div>
     <div
-      v-for="tab in items"
-      :key="tab.id"
-      class="folder-tab"
-      :class="{ 'is-active': tab.id === activeId }"
+      v-if="closed.length"
+      ref="pickWrap"
+      class="folder-tab-add"
     >
-      <NuxtLink
-        class="folder-tab-link"
-        :to="tab.href"
-      >
-        {{ tab.name }}
-      </NuxtLink>
       <button
-        class="folder-tab-close"
+        class="folder-tab-add-btn"
         type="button"
-        :aria-label="`Close ${tab.name}`"
-        @click="closeTab(tab.id)"
+        :aria-expanded="picking"
+        aria-haspopup="menu"
+        aria-label="Open another folder"
+        @click="picking = !picking"
       >
-        ×
+        +
       </button>
+      <div
+        v-if="picking"
+        class="apply-pop"
+        role="menu"
+        aria-label="Open a folder"
+      >
+        <button
+          v-for="folder in closed"
+          :key="folder.id"
+          class="apply-choice"
+          type="button"
+          role="menuitem"
+          @click="openFolder(folder.id)"
+        >
+          {{ folder.name }}
+        </button>
+      </div>
     </div>
   </nav>
 </template>

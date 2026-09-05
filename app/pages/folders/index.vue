@@ -273,7 +273,6 @@ function onKey(event: KeyboardEvent) {
     </div>
 
     <ClientOnly>
-      <FolderTabs />
       <div class="folder-grid">
         <article
           v-for="card in cards"

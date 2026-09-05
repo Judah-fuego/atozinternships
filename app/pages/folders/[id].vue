@@ -55,7 +55,9 @@ function removeRow(id: string) {
       <NuxtLink to="/folders">
         ← Folders
       </NuxtLink>
-      <FolderTabs :active-id="folderId" />
+      <ClientOnly>
+        <FolderTabs :active-id="folderId" />
+      </ClientOnly>
     </div>
     <p
       v-if="!folder"
