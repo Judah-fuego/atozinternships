@@ -17,6 +17,7 @@
  *   npm run scrape
  *   node scripts/scrape-internships.mjs --reclassify-only
  *   node scripts/scrape-internships.mjs --enrich-titles-only
+ *   node scripts/scrape-internships.mjs --enrich-summaries
  *   node scripts/scrape-internships.mjs --check-links
  *   node scripts/scrape-internships.mjs --company-only
  *
@@ -24,6 +25,7 @@
  * If those are missing, GitHub + biotech snapshots still refresh.
  *
  * Stores company, role, location, apply URL, posted date,
+ * a short posting summary, searchable skill mentions (Python, Java, Chinese…),
  * and closed / citizenship / work-authorization flags when the source has them.
  * Does not clone Handshake or invent postings.
  * Truncated Zapply role labels (ending in "...") are expanded from apply-page
@@ -33,6 +35,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pruneDeadInternshipListings } from './check-internship-links.mjs'
+import { enrichListingSummaries, postingFields } from './job-summary.mjs'
 import { loadEnv } from './load-env.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -555,6 +558,12 @@ function mergeListings(...groups) {
     }
     if (!existing.deadline && item.deadline) {
       seen.set(key, { ...seen.get(key), deadline: item.deadline })
+    }
+    if (!existing.summary && item.summary) {
+      seen.set(key, { ...seen.get(key), summary: item.summary })
+    }
+    if (!existing.keywords && item.keywords) {
+      seen.set(key, { ...seen.get(key), keywords: item.keywords })
     }
   }
   return [...seen.values()]
@@ -1082,6 +1091,10 @@ function parseUsaJobsListings(searchResult) {
       closed: false,
       noSponsorship: true,
       usCitizen: usaJobsRequiresCitizenship(descriptor),
+      ...postingFields([
+        descriptor?.UserArea?.Details?.JobSummary,
+        descriptor?.QualificationSummary,
+      ].filter(Boolean).join('\n')),
     })
   }
   return listings
@@ -1259,6 +1272,7 @@ function listingFromYcJob(job) {
     closed: false,
     noSponsorship: visa.noSponsorship,
     usCitizen: visa.usCitizen,
+    ...postingFields(job.description || job.body || job.jobDescription || ''),
   }
 }
 
@@ -1485,6 +1499,7 @@ async function enrichIdealistListing(hit) {
     closed: false,
     noSponsorship: false,
     usCitizen: false,
+    ...postingFields(jsonLd?.description || ''),
   }
 }
 
@@ -1671,7 +1686,7 @@ function keepAtsLocation(location) {
   return isUsCanadaOrRemoteLocation(location)
 }
 
-function listingFromAts(board, role, location, url, posted) {
+function listingFromAts(board, role, location, url, posted, extra = {}) {
   if (!role || !isInternshipRole(role) || isGenericInternRole(role) || isDroppedInternshipRole(role)) {
     return null
   }
@@ -1694,6 +1709,7 @@ function listingFromAts(board, role, location, url, posted) {
     closed: false,
     noSponsorship: false,
     usCitizen: false,
+    ...extra,
   }
 }
 
@@ -1714,7 +1730,7 @@ async function fetchJson(url, options = {}) {
 }
 
 async function fetchGreenhouseBoard(board) {
-  const data = await fetchJson(`https://boards-api.greenhouse.io/v1/boards/${board.board}/jobs`)
+  const data = await fetchJson(`https://boards-api.greenhouse.io/v1/boards/${board.board}/jobs?content=true`)
   const listings = []
   for (const job of data.jobs || []) {
     const offices = (job.offices || []).map((office) => office.name).filter(Boolean)
@@ -1725,6 +1741,7 @@ async function fetchGreenhouseBoard(board) {
       location,
       job.absolute_url,
       formatIsoPosted(job.first_published || job.updated_at),
+      postingFields(job.content || ''),
     )
     if (item) {
       listings.push(item)
@@ -1747,6 +1764,7 @@ async function fetchAshbyBoard(board) {
       location,
       job.jobUrl || job.applyUrl || (job.id ? `https://jobs.ashbyhq.com/${board.board}/${job.id}` : ''),
       formatIsoPosted(job.publishedAt || job.publishedDate),
+      postingFields(job.descriptionPlain || job.descriptionHtml || job.description || ''),
     )
     if (item) {
       listings.push(item)
@@ -1765,12 +1783,14 @@ async function fetchLeverBoard(board) {
     const location = atsLocation(job.categories?.location)
       || atsLocation(job.categories?.allLocations)
     const created = Number(job.createdAt)
+    const lists = (job.lists || []).map((row) => `${row.text || ''}\n${row.content || ''}`).join('\n')
     const item = listingFromAts(
       board,
       clean(job.text || job.title),
       location,
       job.hostedUrl || job.applyUrl,
       Number.isFinite(created) && created > 0 ? formatPosted(Math.floor(created / 1000)) : '',
+      postingFields([job.descriptionPlain, job.description, lists].filter(Boolean).join('\n')),
     )
     if (item) {
       listings.push(item)
@@ -1989,6 +2009,30 @@ function enrichExistingTitlesOnly() {
   })()
 }
 
+async function writeSummaryProgress(label, listings) {
+  process.stdout.write(`${label}\n`)
+  const stats = await enrichListingSummaries(listings, {
+    onProgress(done, total) {
+      if (done % 25 === 0 || done === total) {
+        process.stdout.write(`  ${done}/${total}\n`)
+      }
+    },
+  })
+  process.stdout.write(`  filled ${stats.filled}/${stats.targets}\n`)
+  return stats
+}
+
+function enrichExistingSummariesOnly() {
+  return (async () => {
+    const raw = JSON.parse(readFileSync(OUT, 'utf8'))
+    await writeSummaryProgress(`Enriching posting summaries in ${OUT}…`, raw.listings)
+    const withSummary = raw.listings.filter((item) => item.summary).length
+    const withKeywords = raw.listings.filter((item) => item.keywords).length
+    writeFileSync(OUT, `${JSON.stringify(raw, null, 2)}\n`)
+    process.stdout.write(`Summaries ${withSummary}/${raw.listings.length} · keywords ${withKeywords}/${raw.listings.length}\n`)
+  })()
+}
+
 function trackForListing(item) {
   const id = String(item.id || '')
   let next = inferTrack(item.role)
@@ -2032,6 +2076,10 @@ async function main() {
   }
   if (process.argv.includes('--enrich-titles-only')) {
     await enrichExistingTitlesOnly()
+    return
+  }
+  if (process.argv.includes('--enrich-summaries')) {
+    await enrichExistingSummariesOnly()
     return
   }
   if (process.argv.includes('--company-only')) {
@@ -2105,6 +2153,8 @@ async function main() {
     },
   })
   process.stdout.write(`  expanded ${enrichStats.expanded}/${enrichStats.targets}\n`)
+
+  await writeSummaryProgress('Enriching posting summaries from official apply pages…', listings)
 
   const openCount = listings.filter((item) => !item.closed).length
   const tracks = listings.reduce((counts, item) => {

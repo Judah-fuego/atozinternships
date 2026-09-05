@@ -3,15 +3,30 @@ import { filterListings, sidebarFilterCount, type Filters } from '~/data/listing
 import type { FolderPick } from '~/composables/useSaved'
 
 const PAGE = 40
+const route = useRoute()
+const router = useRouter()
 const { listings, scrapedAt, load } = useListings()
 const saved = useSaved()
 const store = saved.store
-const filters = ref<Filters>({ who: 'all', season: 'all', status: 'open' })
+const initialQuery = typeof route.query.q === 'string' ? route.query.q : ''
+const filters = ref<Filters>({
+  who: 'all',
+  season: 'all',
+  status: 'open',
+  ...(initialQuery ? { query: initialQuery } : {}),
+})
 const visible = ref(PAGE)
 const filtersOpen = ref(false)
 const selecting = ref(false)
 const selected = ref<string[]>([])
 const selectAnchorId = ref<string | null>(null)
+let queryWrite: ReturnType<typeof setTimeout> | undefined
+
+useSiteSeo({
+  title: 'Internship finder — search open internships',
+  description: 'Free internship finder for college students. Search open internships by company, role, and city, then apply on the company page. No account.',
+  path: '/',
+})
 
 onMounted(() => {
   void load()
@@ -36,27 +51,45 @@ watch(filtersOpen, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
 })
 
+watch(() => filters.value.query, (query) => {
+  if (!import.meta.client || route.path !== '/') {
+    return
+  }
+  clearTimeout(queryWrite)
+  queryWrite = setTimeout(() => {
+    if (route.path !== '/') {
+      return
+    }
+    const q = query?.trim() ?? ''
+    const current = typeof route.query.q === 'string' ? route.query.q : ''
+    if (q === current) {
+      return
+    }
+    const next = { ...route.query }
+    if (q) {
+      next.q = q
+    }
+    else {
+      delete next.q
+    }
+    void router.replace({ query: next })
+  }, 350)
+})
+
+watch(() => route.query.q, (value) => {
+  const q = typeof value === 'string' ? value : ''
+  if ((filters.value.query ?? '') === q) {
+    return
+  }
+  filters.value = { ...filters.value, query: q }
+})
+
 onBeforeUnmount(() => {
+  clearTimeout(queryWrite)
   if (import.meta.client) {
     document.body.style.overflow = ''
   }
 })
-
-function onApply(listingId: string, payload: FolderPick) {
-  saved.place([listingId], payload)
-  const listing = listings.value.find((item) => item.id === listingId)
-  const current = store.value.items[listingId]
-  const patch: { status?: 'applying', deadline?: string } = {}
-  if (!current?.status || current.status === 'saved') {
-    patch.status = 'applying'
-  }
-  if (listing?.deadline && !current?.deadline) {
-    patch.deadline = listing.deadline
-  }
-  if (Object.keys(patch).length) {
-    saved.patch(listingId, patch)
-  }
-}
 
 function onSave(listingId: string, payload: FolderPick) {
   saved.place([listingId], payload)
@@ -113,6 +146,9 @@ function toggleSelecting() {
 
 <template>
   <div class="browse">
+    <h1 class="sr-only">
+      Internship search
+    </h1>
     <FilterToolbar
       v-model="filters"
       :open="filtersOpen"
@@ -135,7 +171,7 @@ function toggleSelecting() {
           <input
             class="search"
             type="text"
-            placeholder="Company, role, city…"
+            placeholder="Company, role, Java, Python…"
             :value="filters.query ?? ''"
             @input="filters = { ...filters, query: ($event.target as HTMLInputElement).value }"
           >
@@ -224,7 +260,6 @@ function toggleSelecting() {
           @toggle-select="toggleSelect(item.id, $event)"
           @save="onSave(item.id, $event)"
           @unsave="saved.unsave(item.id)"
-          @apply="onApply(item.id, $event)"
         />
       </div>
       <button
@@ -235,6 +270,12 @@ function toggleSelecting() {
       >
         Show more ({{ (rows.length - shown.length).toLocaleString() }} left)
       </button>
+      <p class="browse-foot">
+        Free internship finder for college students.
+        <NuxtLink to="/guide">How to find internships</NuxtLink>
+        ·
+        <NuxtLink to="/sources">Internship websites</NuxtLink>
+      </p>
     </div>
   </div>
 </template>

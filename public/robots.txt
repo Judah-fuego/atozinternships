@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /folders
+Disallow: /folders/
+
+Sitemap: https://atozinternships.com/sitemap.xml

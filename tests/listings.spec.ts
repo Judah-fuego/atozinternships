@@ -9,12 +9,14 @@ import {
   formatDeadline,
   levelsFromRole,
   listingSource,
+  listingSummary,
   parsePlaces,
   sidebarFilterCount,
   uniqueCompanies,
   visaLabel,
   type Internship,
 } from '../app/data/listings'
+import { extractKeywords, parseApplyTarget, summarizePosting } from '../scripts/job-summary.mjs'
 
 function listing(partial: Partial<Internship> = {}): Internship {
   return {
@@ -199,5 +201,73 @@ describe('parsePlaces', () => {
     expect(parsed.places).toContain('Everett, WA')
     expect(parsed.places).toContain('Mesa, AZ')
     expect(parsed.places.length).toBeGreaterThan(20)
+  })
+})
+
+describe('listingSummary', () => {
+  it('uses the scraped posting summary when one exists', () => {
+    expect(listingSummary(listing({
+      summary: 'You will write Python services and work with Java testers.',
+    }))).toBe('You will write Python services and work with Java testers.')
+  })
+
+  it('falls back to a generated line', () => {
+    expect(listingSummary(listing())).toContain('Software internship at Acme')
+  })
+})
+
+describe('posting text', () => {
+  it('pulls Java, Python, and Chinese out of a job description', () => {
+    const text = 'Required: Java and Python. Mandarin Chinese is a plus. Equal opportunity employer.'
+    expect(extractKeywords(text)).toBe('Python, Java, Chinese')
+    expect(summarizePosting(text)).toMatch(/Java and Python/i)
+    expect(summarizePosting(text)).not.toMatch(/equal opportunity/i)
+  })
+
+  it('maps Greenhouse, Lever, and Ashby apply URLs to official APIs', () => {
+    expect(parseApplyTarget('https://job-boards.greenhouse.io/thenuclearcompany/jobs/5391923008?utm_source=x')).toEqual({
+      kind: 'greenhouse',
+      api: 'https://boards-api.greenhouse.io/v1/boards/thenuclearcompany/jobs/5391923008',
+    })
+    expect(parseApplyTarget('https://jobs.lever.co/palantir/373367a9-3160-49d8-b7af-2efec062fad1')).toEqual({
+      kind: 'lever',
+      api: 'https://api.lever.co/v0/postings/palantir/373367a9-3160-49d8-b7af-2efec062fad1',
+    })
+    expect(parseApplyTarget('https://jobs.ashbyhq.com/replit/7e0dafe8-3eec-442e-aa76-a4d84d779fb1')).toEqual({
+      kind: 'ashby',
+      api: 'https://api.ashbyhq.com/posting-api/job-board/replit/job/7e0dafe8-3eec-442e-aa76-a4d84d779fb1',
+    })
+    expect(parseApplyTarget('https://www.linkedin.com/jobs/view/1')).toBeNull()
+  })
+})
+
+describe('search over posting specifics', () => {
+  it('finds Java or Chinese from keywords even when the title is generic', () => {
+    const rows = [
+      listing({ id: 'java', role: 'Software Engineer Intern', keywords: 'Java, SQL' }),
+      listing({ id: 'cn', role: 'Policy Intern', keywords: 'Chinese, Mandarin' }),
+      listing({ id: 'plain', role: 'Software Engineer Intern' }),
+    ]
+    expect(filterListings(rows, { query: 'java' }).map((item) => item.id)).toEqual(['java'])
+    expect(filterListings(rows, { query: 'chinese' }).map((item) => item.id)).toEqual(['cn'])
+  })
+
+  it('does not treat JavaScript as Java', () => {
+    const rows = [
+      listing({ id: 'js', role: 'Software Engineer Intern', keywords: 'JavaScript, TypeScript' }),
+      listing({ id: 'java', role: 'Backend Intern', keywords: 'Java, SQL' }),
+    ]
+    expect(filterListings(rows, { query: 'java' }).map((item) => item.id)).toEqual(['java'])
+  })
+
+  it('still finds a posting when the query is a little off', () => {
+    const rows = [
+      listing({ id: 'py', role: 'Backend Intern', keywords: 'Python, SQL' }),
+      listing({ id: 'ms', company: 'Microsoft', role: 'Product Intern' }),
+      listing({ id: 'eng', role: 'Software Engineering Intern' }),
+    ]
+    expect(filterListings(rows, { query: 'pyhton' }).map((item) => item.id)).toEqual(['py'])
+    expect(filterListings(rows, { query: 'microsft' }).map((item) => item.id)).toEqual(['ms'])
+    expect(filterListings(rows, { query: 'engineer' }).map((item) => item.id)).toEqual(['eng'])
   })
 })

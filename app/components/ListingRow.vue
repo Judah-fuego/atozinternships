@@ -22,7 +22,6 @@ const emit = defineEmits<{
   toggleSelect: [event: MouseEvent]
   save: [payload: { folderId?: string, newFolder?: string }]
   unsave: []
-  apply: [payload: { folderId?: string, newFolder?: string }]
 }>()
 
 const open = ref(false)
@@ -105,9 +104,6 @@ function togglePlaces() {
       :company="item.company"
       :role="item.role"
       :url="item.url"
-      :folders="folders"
-      :folder-ids="folderIds"
-      @apply="emit('apply', $event)"
     />
     <FolderPicker
       class="save-menu"
@@ -136,14 +132,25 @@ function togglePlaces() {
       v-if="open"
       class="detail"
     >
-      <p>{{ listingSummary(item) }} {{ eligibilityLine(item) }}.</p>
+      <p>{{ listingSummary(item) }}</p>
+      <p v-if="item.keywords">
+        Mentions {{ item.keywords }}.
+      </p>
       <p>
-        {{ TRACK_LABEL[item.track] }}
+        {{ eligibilityLine(item) }}
+        · {{ TRACK_LABEL[item.track] }}
         · {{ source.label }}
         <template v-if="item.closed">
           · Closed
         </template>
       </p>
+      <div class="detail-actions">
+        <a
+          :href="item.url"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Open posting</a>
+      </div>
     </div>
   </article>
 </template>

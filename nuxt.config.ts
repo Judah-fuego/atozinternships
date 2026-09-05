@@ -5,11 +5,13 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
   app: {
     head: {
-      title: 'atozinternships.com',
+      title: 'Internship finder — search open internships',
+      titleTemplate: '%s · atoz',
       htmlAttrs: { lang: 'en' },
       meta: [
-        { name: 'description', content: 'Free internship search for college students. No account. Apply on the company page, save folders, and track applications here.' },
+        { name: 'description', content: 'Free internship finder for college students. Search open internships by company, role, and city, then apply on the company page. No account.' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+        { name: 'theme-color', content: '#ffffff' },
       ],
       link: [
         { key: 'icon-svg', rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg?v=3' },
@@ -19,9 +21,16 @@ export default defineNuxtConfig({
       ],
     },
   },
+  routeRules: {
+    '/': { prerender: true },
+    '/guide': { prerender: true },
+    '/sources': { prerender: true },
+    '/folders/**': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
+  },
   nitro: {
     prerender: {
       crawlLinks: false,
+      routes: ['/', '/guide', '/sources'],
     },
   },
   vite: {

@@ -3,6 +3,14 @@ import { eligibilityLine } from '~/data/listings'
 import { ALL_FOLDER_ID, STATUS_LABEL, STATUSES, type Status } from '~/utils/saved'
 
 const route = useRoute()
+
+useSiteSeo({
+  title: 'Folder',
+  description: 'Internships you saved in this folder.',
+  path: route.path,
+  index: false,
+})
+
 const { listings, load } = useListings()
 const saved = useSaved()
 const store = saved.store

@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { ALL_FOLDER_ID, idsForFolder } from '~/utils/saved'
 
+useSiteSeo({
+  title: 'Folders',
+  description: 'Lists you make while browsing internships. Open a few at once as tabs, or export a CSV.',
+  path: '/folders',
+  index: false,
+})
+
 const saved = useSaved()
 const store = saved.store
 const tabs = useFolderTabs()

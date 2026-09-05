@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { queryMatches } from '~/data/listings'
+
 export type FilterSearchOption = {
   id: string
   label: string
@@ -22,7 +24,7 @@ const selectedSet = computed(() => new Set(selected.value))
 const matches = computed(() => {
   const q = query.value.trim().toLowerCase()
   const rows = q
-    ? props.options.filter((item) => item.label.toLowerCase().includes(q))
+    ? props.options.filter((item) => queryMatches(item.label, q))
     : props.options
   return rows.filter((item) => (item.count ?? 1) > 0 || selectedSet.value.has(item.id))
 })

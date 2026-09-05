@@ -65,6 +65,8 @@ export type Internship = {
   closed: boolean
   noSponsorship: boolean
   usCitizen: boolean
+  summary?: string
+  keywords?: string
 }
 
 export type Filters = {
@@ -462,6 +464,10 @@ export function formatDeadline(iso: string): string {
 }
 
 export function listingSummary(item: Internship): string {
+  const stored = String(item.summary || '').replace(/\s+/g, ' ').trim()
+  if (stored) {
+    return stored
+  }
   const field = TRACK_LABEL[item.track]
   const season = SEASON_LABEL[item.season]
   const place = item.location && !/^multiple locations$/i.test(item.location)
@@ -474,6 +480,93 @@ export function listingSummary(item: Internship): string {
 
 function normalizeQuery(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function tokens(value: string) {
+  return value.toLowerCase().match(/[a-z0-9+#]+/g) ?? []
+}
+
+function maxEdits(len: number) {
+  if (len <= 2) {
+    return 0
+  }
+  if (len <= 5) {
+    return 1
+  }
+  return 2
+}
+
+function withinEdits(a: string, b: string, max: number) {
+  if (a === b) {
+    return true
+  }
+  const la = a.length
+  const lb = b.length
+  if (!la || !lb || Math.abs(la - lb) > max) {
+    return false
+  }
+
+  let prev2 = Array.from({ length: lb + 1 }, () => 0)
+  let prev = Array.from({ length: lb + 1 }, (_, j) => j)
+
+  for (let i = 1; i <= la; i++) {
+    const curr = Array.from({ length: lb + 1 }, () => 0)
+    curr[0] = i
+    let rowMin = i
+    const ca = a.charCodeAt(i - 1)
+    for (let j = 1; j <= lb; j++) {
+      const cb = b.charCodeAt(j - 1)
+      let next = Math.min(
+        prev[j] + 1,
+        curr[j - 1] + 1,
+        prev[j - 1] + (ca === cb ? 0 : 1),
+      )
+      if (
+        i > 1
+        && j > 1
+        && ca === b.charCodeAt(j - 2)
+        && cb === a.charCodeAt(i - 2)
+      ) {
+        next = Math.min(next, prev2[j - 2] + 1)
+      }
+      curr[j] = next
+      if (next < rowMin) {
+        rowMin = next
+      }
+    }
+    if (rowMin > max) {
+      return false
+    }
+    prev2 = prev
+    prev = curr
+  }
+  return prev[lb] <= max
+}
+
+function wordMatches(word: string, token: string) {
+  if (word === token) {
+    return true
+  }
+  if (token.length <= 2) {
+    return word.includes(token)
+  }
+  if (token.length >= 5 && word.startsWith(token)) {
+    return true
+  }
+  return withinEdits(token, word, maxEdits(token.length))
+}
+
+export function queryMatches(haystack: string, query: string) {
+  const q = query.trim().toLowerCase()
+  if (!q) {
+    return true
+  }
+  if (q.length <= 2) {
+    return haystack.toLowerCase().includes(q)
+  }
+  const needles = tokens(q)
+  const words = tokens(haystack)
+  return needles.every((token) => words.some((word) => wordMatches(word, token)))
 }
 
 export function filterListings(listings: Internship[], options: Filters = {}) {
@@ -531,13 +624,15 @@ export function filterListings(listings: Internship[], options: Filters = {}) {
       item.company,
       item.role,
       item.location,
+      item.summary,
+      item.keywords,
       TRACK_LABEL[item.track],
       FAMILY_LABEL[familyFor(item.track)],
       eligibilityLine(item),
     ]
       .join(' ')
       .toLowerCase()
-    return haystack.includes(query)
+    return queryMatches(haystack, query)
   })
 }
 

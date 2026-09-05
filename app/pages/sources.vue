@@ -1,8 +1,48 @@
+<script setup lang="ts">
+import { SITE_NAME, siteUrl } from '~/utils/site'
+
+useSiteSeo({
+  title: 'Internship websites finder',
+  description: 'A finder for internship websites: what we list here, plus Handshake, LinkedIn, Indeed, Y Combinator, USAJobs, and company career pages.',
+  path: '/sources',
+})
+
+useJsonLd('ld-sources', {
+  '@context': 'https://schema.org',
+  '@type': 'ItemList',
+  name: 'Internship websites',
+  itemListElement: [
+    { '@type': 'ListItem', position: 1, name: 'atoz internships', url: siteUrl('/') },
+    { '@type': 'ListItem', position: 2, name: 'Handshake', url: 'https://joinhandshake.com/' },
+    { '@type': 'ListItem', position: 3, name: 'LinkedIn Jobs', url: 'https://www.linkedin.com/jobs/' },
+    { '@type': 'ListItem', position: 4, name: 'Indeed', url: 'https://www.indeed.com/' },
+    { '@type': 'ListItem', position: 5, name: 'Y Combinator internships', url: 'https://www.ycombinator.com/internships' },
+    { '@type': 'ListItem', position: 6, name: 'USAJobs student internships', url: 'https://www.usajobs.gov/Search/Results?hp=student' },
+    { '@type': 'ListItem', position: 7, name: 'Idealist internships', url: 'https://www.idealist.org/en/internships' },
+  ],
+})
+
+useJsonLd('ld-sources-crumbs', {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    { '@type': 'ListItem', position: 1, name: SITE_NAME, item: siteUrl('/') },
+    { '@type': 'ListItem', position: 2, name: 'Internship websites', item: siteUrl('/sources') },
+  ],
+})
+</script>
+
 <template>
-  <div class="page">
+  <div class="page doc-page">
+    <h1>Internship websites</h1>
     <p class="lede">
-      We ingest public lists and official APIs. We do not scrape Handshake, LinkedIn, or Indeed.
+      A short finder for the internship websites worth using. We ingest public lists and official APIs.
+      When a posting publishes a description on Greenhouse, Lever, Ashby, Workday, or USAJobs, we keep a short summary and skill mentions
+      so search can find Java, Python, Chinese, and the like. We do not scrape Handshake, LinkedIn, or Indeed.
       Apply on the employer page. These other sites are still worth opening on your own.
+      See
+      <NuxtLink to="/guide">how to find internships</NuxtLink>
+      if you want the order of operations.
     </p>
     <dl class="sources">
       <dt>On this site</dt>

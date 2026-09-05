@@ -19,6 +19,9 @@
       <NuxtLink to="/sources">
         Sources
       </NuxtLink>
+      <NuxtLink to="/guide">
+        Guide
+      </NuxtLink>
     </nav>
   </header>
 </template>
