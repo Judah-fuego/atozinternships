@@ -201,13 +201,11 @@ function toggleSelecting() {
           >{{ filterCount }}</span>
         </button>
         <div class="browse-search">
-          <input
-            class="search"
-            type="text"
+          <BrowseSearch
+            :model-value="filters.query ?? ''"
             placeholder="Company, role, Java, Python…"
-            :value="filters.query ?? ''"
-            @input="filters = { ...filters, query: ($event.target as HTMLInputElement).value }"
-          >
+            @update:model-value="filters = { ...filters, query: $event }"
+          />
           <div class="count">
             <template v-if="selecting">
               {{ selectedCount }} selected

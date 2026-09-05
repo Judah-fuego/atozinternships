@@ -10,8 +10,9 @@
  *   - Y Combinator internships page (ycombinator.com/internships)
  *     plus intern rows on the public Work at a Startup jobs board
  *   - Idealist U.S. nonprofit internships (public search + listing pages)
- *   - Official company boards (Greenhouse, Ashby, Lever, Workday) for
- *     large employers the GitHub lists often miss
+ *   - Official company boards (Greenhouse, Ashby, Lever, Workday) plus
+ *     Meta, Google, and Amazon career search for large employers the
+ *     GitHub lists often miss
  *
  * Usage (repo root):
  *   npm run scrape
@@ -32,7 +33,7 @@
  * Truncated Zapply role labels (ending in "...") are expanded from apply-page
  * og:title when the listing URL allows it.
  */
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isSpecificPostingUrl } from './apply-url.mjs'
@@ -202,13 +203,98 @@ function listingKey(item) {
   return [slugPart(item.company), slugPart(item.role), slugPart(item.location).slice(0, 40)].join('|')
 }
 
-function formatPosted(unix) {
+function isoFromUnix(unix) {
   const value = Number(unix)
   if (!Number.isFinite(value) || value <= 0) {
     return ''
   }
-  const date = new Date(value * 1000)
+  const ms = value > 1e12 ? value : value * 1000
+  const date = new Date(ms)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString()
+}
+
+function isoFromDateValue(value) {
+  if (typeof value === 'number') {
+    return isoFromUnix(value)
+  }
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString()
+}
+
+function formatPosted(unix) {
+  const iso = isoFromUnix(unix)
+  if (!iso) {
+    return ''
+  }
+  const date = new Date(iso)
   return `${MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}`
+}
+
+function postedAtFromLabel(posted, asOf = new Date()) {
+  const value = String(posted || '').trim().toLowerCase()
+  if (!value || value === 'date unknown') {
+    return ''
+  }
+  const now = asOf.getTime()
+  if (value === 'today' || value === 'just posted') {
+    return new Date(asOf.getFullYear(), asOf.getMonth(), asOf.getDate()).toISOString()
+  }
+  if (value === 'yesterday') {
+    return new Date(asOf.getFullYear(), asOf.getMonth(), asOf.getDate() - 1).toISOString()
+  }
+  if (value === 'recently') {
+    return new Date(now - 2 * 86_400_000).toISOString()
+  }
+  if (/^30\+\s*days?\s*ago$/.test(value)) {
+    return new Date(now - 31 * 86_400_000).toISOString()
+  }
+  const relative = value.match(/^(\d+)\s*(mo|h|d|w|m)$/)
+  if (relative) {
+    const amount = Number(relative[1])
+    const unit = relative[2]
+    const ms = unit === 'm'
+      ? amount * 60_000
+      : unit === 'h'
+        ? amount * 3_600_000
+        : unit === 'd'
+          ? amount * 86_400_000
+          : unit === 'w'
+            ? amount * 7 * 86_400_000
+            : unit === 'mo'
+              ? amount * 30 * 86_400_000
+              : 0
+    return ms ? new Date(now - ms).toISOString() : ''
+  }
+  if (/[0-9]{4}/.test(posted)) {
+    return isoFromDateValue(posted)
+  }
+  const calendar = value.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})$/)
+  if (calendar) {
+    const month = MONTHS.findIndex((label) => label.toLowerCase() === calendar[1].slice(0, 3))
+    const day = Number(calendar[2])
+    if (month < 0 || day < 1 || day > 31) {
+      return ''
+    }
+    const today = new Date(asOf.getFullYear(), asOf.getMonth(), asOf.getDate()).getTime()
+    let year = asOf.getFullYear()
+    let time = new Date(year, month, day).getTime()
+    if (time > today + 86_400_000) {
+      year -= 1
+      time = new Date(year, month, day).getTime()
+    }
+    return new Date(time).toISOString()
+  }
+  return ''
+}
+
+function withPostedAt(listings, asOf = new Date()) {
+  return listings.map((item) => {
+    if (item.postedAt && !Number.isNaN(Date.parse(item.postedAt))) {
+      return item
+    }
+    const postedAt = postedAtFromLabel(item.posted, asOf)
+    return postedAt ? { ...item, postedAt } : item
+  })
 }
 
 function isOfficialUrl(url) {
@@ -386,6 +472,7 @@ function parseSimplifyListings(rows) {
       location: locations.join(', ') || 'Multiple locations',
       url,
       posted: formatPosted(row.date_posted),
+      postedAt: isoFromUnix(row.date_posted),
       season: inferSeason(role, terms),
       track: inferTrack(role),
       closed: false,
@@ -567,6 +654,13 @@ function mergeListings(...groups) {
     }
     if (!existing.keywords && item.keywords) {
       seen.set(key, { ...seen.get(key), keywords: item.keywords })
+    }
+    if (!existing.postedAt && item.postedAt) {
+      seen.set(key, {
+        ...seen.get(key),
+        postedAt: item.postedAt,
+        posted: existing.posted || item.posted,
+      })
     }
   }
   return [...seen.values()]
@@ -1088,6 +1182,7 @@ function parseUsaJobsListings(searchResult) {
       location,
       url: url.replace(/:443\//, '/'),
       posted: formatIsoPosted(descriptor.PublicationStartDate),
+      postedAt: isoFromDateValue(descriptor.PublicationStartDate),
       deadline: isoDateOnly(descriptor.ApplicationCloseDate),
       season: inferSeason(role),
       track,
@@ -1496,6 +1591,7 @@ async function enrichIdealistListing(hit) {
     location: formatIdealistLocation(hit),
     url,
     posted: formatIsoPosted(isoDateOnly(hit.published) || jsonLd?.datePosted),
+    postedAt: isoFromDateValue(hit.published || jsonLd?.datePosted),
     deadline: deadline && !isPastIsoDate(deadline) ? deadline : '',
     season: inferSeason(role),
     track: inferTrack(role) === 'other' ? 'nonprofit' : inferTrack(role),
@@ -1744,7 +1840,10 @@ async function fetchGreenhouseBoard(board) {
       location,
       job.absolute_url,
       formatIsoPosted(job.first_published || job.updated_at),
-      postingFields(job.content || ''),
+      {
+        postedAt: isoFromDateValue(job.first_published || job.updated_at),
+        ...postingFields(job.content || ''),
+      },
     )
     if (item) {
       listings.push(item)
@@ -1767,7 +1866,10 @@ async function fetchAshbyBoard(board) {
       location,
       job.jobUrl || job.applyUrl || (job.id ? `https://jobs.ashbyhq.com/${board.board}/${job.id}` : ''),
       formatIsoPosted(job.publishedAt || job.publishedDate),
-      postingFields(job.descriptionPlain || job.descriptionHtml || job.description || ''),
+      {
+        postedAt: isoFromDateValue(job.publishedAt || job.publishedDate),
+        ...postingFields(job.descriptionPlain || job.descriptionHtml || job.description || ''),
+      },
     )
     if (item) {
       listings.push(item)
@@ -1793,7 +1895,10 @@ async function fetchLeverBoard(board) {
       location,
       job.hostedUrl || job.applyUrl,
       Number.isFinite(created) && created > 0 ? formatPosted(Math.floor(created / 1000)) : '',
-      postingFields([job.descriptionPlain, job.description, lists].filter(Boolean).join('\n')),
+      {
+        postedAt: Number.isFinite(created) && created > 0 ? isoFromUnix(created) : '',
+        ...postingFields([job.descriptionPlain, job.description, lists].filter(Boolean).join('\n')),
+      },
     )
     if (item) {
       listings.push(item)
@@ -1821,12 +1926,266 @@ async function fetchCompanyAtsInternships() {
   return listings
 }
 
+function extractAfCallback(html, key) {
+  const marker = `AF_initDataCallback({key: '${key}'`
+  const start = html.indexOf(marker)
+  if (start < 0) {
+    return null
+  }
+  const dataStart = html.indexOf('data:', start) + 5
+  let depth = 0
+  let i = dataStart
+  while (i < html.length) {
+    const ch = html[i]
+    if (ch === '[' || ch === '{') {
+      depth += 1
+    }
+    else if (ch === ']' || ch === '}') {
+      depth -= 1
+      if (depth === 0) {
+        i += 1
+        break
+      }
+    }
+    else if (ch === '"') {
+      i += 1
+      while (i < html.length) {
+        if (html[i] === '"' && html[i - 1] !== '\\') {
+          break
+        }
+        i += 1
+      }
+    }
+    i += 1
+  }
+  try {
+    return JSON.parse(html.slice(dataStart, i))
+  }
+  catch {
+    return null
+  }
+}
+
+async function fetchHtml(url) {
+  const response = await fetch(url, {
+    headers: {
+      'user-agent': BROWSER_UA,
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'accept-language': 'en-US,en;q=0.9',
+    },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(20000),
+  })
+  if (!response.ok) {
+    throw new Error(`${url} → ${response.status}`)
+  }
+  return response.text()
+}
+
+function formatAtsPlaces(parts) {
+  const places = [...new Set((parts || []).map(clean).filter(Boolean))]
+  if (!places.length) {
+    return 'See posting'
+  }
+  if (places.length >= 3) {
+    return `${places.length} locations ${places.join(', ')}`
+  }
+  return places.join(', ')
+}
+
+async function fetchAmazonInternships() {
+  const listings = []
+  const seen = new Set()
+  for (const country of ['USA', 'CAN']) {
+    let offset = 0
+    let hits = Infinity
+    let pages = 0
+    while (offset < hits && pages < 15) {
+      const url = new URL('https://www.amazon.jobs/en/search.json')
+      url.searchParams.set('base_query', 'intern')
+      url.searchParams.set('offset', String(offset))
+      url.searchParams.set('result_limit', '100')
+      url.searchParams.set('sort', 'relevant')
+      url.searchParams.set('country', country)
+      const data = await fetchJson(url, { timeoutMs: 20000 })
+      const jobs = data.jobs || []
+      hits = Number.isFinite(Number(data.hits)) ? Number(data.hits) : jobs.length
+      for (const job of jobs) {
+        const role = clean(job.title)
+        const location = clean(job.normalized_location || job.location || [job.city, job.state].filter(Boolean).join(', '))
+        const path = String(job.job_path || '')
+        const href = path
+          ? `https://www.amazon.jobs${path}`
+          : job.id_icims
+            ? `https://www.amazon.jobs/en/jobs/${job.id_icims}`
+            : ''
+        const item = listingFromAts(
+          { company: 'Amazon' },
+          role,
+          location,
+          href,
+          formatPosted(Date.parse(job.posted_date) / 1000) || formatWorkdayPosted(job.updated_time),
+          {
+            postedAt: isoFromDateValue(job.posted_date) || postedAtFromLabel(formatWorkdayPosted(job.updated_time)),
+            ...postingFields([job.description_short, job.description, job.basic_qualifications].filter(Boolean).join('\n')),
+          },
+        )
+        if (!item || seen.has(item.url)) {
+          continue
+        }
+        seen.add(item.url)
+        item.id = `company-amazon-${slugPart(role)}-${slugPart(job.id_icims || job.id || location)}`
+        listings.push(item)
+      }
+      if (!jobs.length) {
+        break
+      }
+      offset += jobs.length
+      pages += 1
+      if (offset < hits) {
+        await sleep(150)
+      }
+    }
+  }
+  return listings
+}
+
+async function fetchGoogleInternships() {
+  const listings = []
+  const seen = new Set()
+  let page = 1
+  let total = Infinity
+  while (page <= 8 && listings.length < total) {
+    const url = new URL('https://www.google.com/about/careers/applications/jobs/results')
+    url.searchParams.set('q', 'intern')
+    if (page > 1) {
+      url.searchParams.set('page', String(page))
+    }
+    const html = await fetchHtml(url)
+    const data = extractAfCallback(html, 'ds:1')
+    const jobs = Array.isArray(data?.[0]) ? data[0] : []
+    if (typeof data?.[2] === 'number') {
+      total = data[2]
+    }
+    for (const job of jobs) {
+      if (!Array.isArray(job)) {
+        continue
+      }
+      const id = String(job[0] || '')
+      const role = clean(job[1])
+      if (!id || seen.has(id)) {
+        continue
+      }
+      const company = clean(job[7]) || 'Google'
+      const locRows = Array.isArray(job[9]) ? job[9] : []
+      const places = locRows.map((row) => (Array.isArray(row) ? clean(row[0] || row[2]) : '')).filter(Boolean)
+      const location = formatAtsPlaces(places)
+      const postedAt = Array.isArray(job[12]) ? isoFromUnix(job[12][0]) : ''
+      const about = Array.isArray(job[10]) ? job[10][1] : ''
+      const item = listingFromAts(
+        { company },
+        role,
+        location,
+        `https://www.google.com/about/careers/applications/jobs/results/${id}-${slugPart(role)}`,
+        postedAt ? formatPosted(Date.parse(postedAt) / 1000) : '',
+        {
+          postedAt,
+          ...postingFields([about, Array.isArray(job[3]) ? job[3][1] : '', Array.isArray(job[4]) ? job[4][1] : ''].filter(Boolean).join('\n')),
+        },
+      )
+      if (!item) {
+        continue
+      }
+      seen.add(id)
+      item.id = `company-google-${slugPart(role)}-${id.slice(-8)}`
+      listings.push(item)
+    }
+    if (!jobs.length) {
+      break
+    }
+    page += 1
+    await sleep(200)
+  }
+  return listings
+}
+
+function parseMetaSearchHtml(html) {
+  const listings = []
+  const seen = new Set()
+  const re = /\/profile\/job_details\/(\d+)/g
+  let match = re.exec(html)
+  while (match) {
+    const id = match[1]
+    if (seen.has(id)) {
+      match = re.exec(html)
+      continue
+    }
+    seen.add(id)
+    const window = html.slice(Math.max(0, match.index - 400), match.index + 800)
+    const title = clean(
+      (window.match(/"title":"([^"]+)"/) || window.match(/<h3[^>]*>([^<]+)<\/h3>/) || [])[1] || '',
+    )
+    const location = clean(
+      (window.match(/"locations?":\["([^"]+)"/) || window.match(/([A-Z][A-Za-z .]+,\s*[A-Z]{2})/) || [])[1] || '',
+    )
+    const item = listingFromAts(
+      { company: 'Meta' },
+      title,
+      location,
+      `https://www.metacareers.com/jobs/${id}`,
+      '',
+    )
+    if (item) {
+      item.id = `company-meta-${slugPart(item.role)}-${id.slice(-8)}`
+      listings.push(item)
+    }
+    match = re.exec(html)
+  }
+  return listings
+}
+
+async function fetchMetaInternships() {
+  const listings = []
+  const seen = new Set()
+  const queries = [
+    ['roles', 'https://www.metacareers.com/jobsearch/?roles[0]=Internship'],
+    ['intern', 'https://www.metacareers.com/jobsearch/?q=intern&roles[0]=Internship'],
+    ['software', 'https://www.metacareers.com/jobsearch/?q=software+engineer+intern'],
+  ]
+  for (const [label, href] of queries) {
+    try {
+      const html = await fetchHtml(href)
+      for (const item of parseMetaSearchHtml(html)) {
+        if (seen.has(item.url)) {
+          continue
+        }
+        seen.add(item.url)
+        listings.push(item)
+      }
+    }
+    catch (error) {
+      process.stderr.write(`Meta ${label}: ${error.message}\n`)
+    }
+    await sleep(200)
+  }
+  return listings
+}
+
 async function fetchCompanyInternships() {
-  const [ats, workday] = await Promise.all([
+  const [ats, workday, amazon, google, meta] = await Promise.all([
     fetchCompanyAtsInternships(),
     fetchCompanyWorkdayInternships(),
+    fetchAmazonInternships().catch((error) => {
+      process.stderr.write(`Amazon: ${error.message}\n`)
+      return []
+    }),
+    fetchGoogleInternships().catch((error) => {
+      process.stderr.write(`Google: ${error.message}\n`)
+      return []
+    }),
+    fetchMetaInternships(),
   ])
-  return [...ats, ...workday]
+  return [...ats, ...workday, ...amazon, ...google, ...meta]
 }
 
 async function fetchText(url) {
@@ -2096,9 +2455,12 @@ async function main() {
   if (process.argv.includes('--company-only')) {
     const raw = JSON.parse(readFileSync(OUT, 'utf8'))
     process.stdout.write('Fetching official company career boards…\n')
+    const existingAsOf = existsSync(OUT) ? statSync(OUT).mtime : new Date()
     const company = await fetchCompanyInternships()
-    const listings = mergeListings(raw.listings || [], company)
-      .filter((item) => isSpecificPostingUrl(item.url))
+    const listings = withPostedAt(
+      mergeListings(withPostedAt(raw.listings || [], existingAsOf), withPostedAt(company)),
+      new Date(),
+    ).filter((item) => isSpecificPostingUrl(item.url))
     const openCount = listings.filter((item) => !item.closed).length
     const payload = {
       ...raw,
@@ -2136,8 +2498,9 @@ async function main() {
   const simplify = parseSimplifyListings(JSON.parse(simplifyJson))
   const jobright = parseJobrightTable(jobrightMd)
   const zapply = parseZapplyTables(zapplyMd)
-  let listings = mergeListings(vansh, simplify, jobright, zapply, usajobs, biotech, yc, idealist, company)
-    .filter((item) => isSpecificPostingUrl(item.url))
+  let listings = withPostedAt(
+    mergeListings(vansh, simplify, jobright, zapply, usajobs, biotech, yc, idealist, company),
+  ).filter((item) => isSpecificPostingUrl(item.url))
   if (process.argv.includes('--check-links')) {
     process.stdout.write(`Checking ${listings.length} apply links…\n`)
     const pruned = await pruneDeadInternshipListings(listings, {

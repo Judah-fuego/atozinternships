@@ -12,6 +12,9 @@ import {
   listingSource,
   listingSummary,
   parsePlaces,
+  formatPostedAgo,
+  hydratePostedAt,
+  listingPostedAgeMs,
   postedAgeDays,
   sidebarFilterCount,
   sortListingsByPosted,
@@ -184,6 +187,31 @@ describe('postedAgeDays', () => {
   })
 })
 
+describe('formatPostedAgo', () => {
+  const asOf = new Date(2026, 8, 5, 16, 13, 50)
+
+  it('ages a stored timestamp instead of the frozen scrape label', () => {
+    const postedAt = new Date(2026, 8, 5, 14, 0, 50).toISOString()
+    expect(formatPostedAgo({ posted: '13m', postedAt }, asOf)).toBe('2h')
+    expect(listingPostedAgeMs({ posted: '13m', postedAt }, asOf)).toBe(asOf.getTime() - Date.parse(postedAt))
+  })
+
+  it('falls back to the posted label when there is no timestamp', () => {
+    expect(formatPostedAgo({ posted: '13m' }, asOf)).toBe('13m')
+    expect(formatPostedAgo({ posted: 'Sep 1' }, asOf)).toBe('4d')
+    expect(formatPostedAgo({ posted: 'Aug 21' }, asOf)).toBe('Aug 21')
+  })
+})
+
+describe('hydratePostedAt', () => {
+  it('anchors relative labels to scrape time so they can age later', () => {
+    const scrapedAt = '2026-09-05T14:13:50-05:00'
+    const [row] = hydratePostedAt([listing({ posted: '13m' })], scrapedAt)
+    expect(row.postedAt).toBe(new Date(Date.parse(scrapedAt) - 13 * 60_000).toISOString())
+    expect(formatPostedAgo(row, new Date('2026-09-05T16:13:50-05:00'))).toBe('2h')
+  })
+})
+
 describe('sortListingsByPosted', () => {
   const asOf = new Date(2026, 8, 5, 14, 18)
   const mixed = [
@@ -222,6 +250,21 @@ describe('facetCounts', () => {
     expect(counts.companies.Beta).toBeUndefined()
     expect(counts.families.software).toBe(2)
     expect(counts.families.health).toBe(0)
+  })
+
+  it('keeps facet counts aligned with filterListings when a query is set', () => {
+    const rows = [
+      listing({ id: 'java', role: 'Software Engineer Intern', keywords: 'Java, SQL' }),
+      listing({ id: 'cn', role: 'Policy Intern', track: 'policy', keywords: 'Chinese, Mandarin' }),
+      listing({ id: 'plain', role: 'Software Engineer Intern' }),
+    ]
+    const options = { query: 'java', status: 'all' as const }
+    const counts = facetCounts(rows, options)
+    expect(counts.who.all).toBe(filterListings(rows, { ...options, who: 'all' }).length)
+    expect(counts.who.undergrad).toBe(filterListings(rows, { ...options, who: 'undergrad' }).length)
+    expect(counts.season.all).toBe(filterListings(rows, { ...options, season: 'all' }).length)
+    expect(counts.status.all).toBe(filterListings(rows, { ...options, status: 'all' }).length)
+    expect(counts.companies.Acme).toBe(1)
   })
 })
 
@@ -263,6 +306,10 @@ describe('listingSource', () => {
   it('labels Idealist and USAJobs rows', () => {
     expect(listingSource(listing({ id: 'idealist-aclu-intern-1', url: 'https://www.aclu.org/jobs' })).label).toBe('Idealist')
     expect(listingSource(listing({ id: 'usajobs-nsa-intern-1', url: 'https://www.usajobs.gov/job/1' })).label).toBe('USAJobs')
+    expect(listingSource(listing({
+      id: 'company-google-software-engineer-intern-mountain-view',
+      url: 'https://www.google.com/about/careers/applications/jobs/results/1-software-engineering-intern',
+    })).label).toBe('Company career page')
   })
 })
 
@@ -445,6 +492,11 @@ describe('closed apply pages', () => {
     expect(isSpecificPostingUrl('https://jobs.bytedance.com/en/position/7537163899668531474/detail')).toBe(true)
     expect(isSpecificPostingUrl('https://apply.workable.com/quadric-dot-i-o-inc/j/AAE0675990/apply')).toBe(true)
     expect(isSpecificPostingUrl('https://careers.point72.com/CSJobDetail?jobCode=CPA-0014081')).toBe(true)
+    expect(isSpecificPostingUrl('https://www.amazon.jobs/en/jobs/10503471/software-development-engineer-intern')).toBe(true)
+    expect(isSpecificPostingUrl('https://www.amazon.jobs/en/search?base_query=intern')).toBe(false)
+    expect(isSpecificPostingUrl('https://www.google.com/about/careers/applications/jobs/results/85564713261245126-software-engineering-intern-bs-summer-2027')).toBe(true)
+    expect(isSpecificPostingUrl('https://www.metacareers.com/jobs/1027438186737957')).toBe(true)
+    expect(isSpecificPostingUrl('https://www.metacareers.com/careerprograms/students')).toBe(false)
     expect(internshipBoardForCompany('Replit', 'https://jobs.ashbyhq.com/replit/7e0dafe8-3eec-442e-aa76-a4d84d779fb1')).toBe('https://jobs.ashbyhq.com/replit')
   })
 })

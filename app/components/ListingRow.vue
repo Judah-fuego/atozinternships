@@ -3,6 +3,7 @@ import {
   TRACK_LABEL,
   eligibilityLine,
   formatDeadline,
+  formatPostedAgo,
   listingSource,
   listingSummary,
   parsePlaces,
@@ -26,8 +27,15 @@ const emit = defineEmits<{
 
 const open = ref(false)
 const placesOpen = ref(false)
+const now = useNow()
 const source = computed(() => listingSource(props.item))
 const places = computed(() => parsePlaces(props.item.location))
+const postedLabel = computed(() => {
+  if (props.item.deadline) {
+    return `Due ${formatDeadline(props.item.deadline)}`
+  }
+  return formatPostedAgo(props.item, now.value)
+})
 
 function onRowClick(event: MouseEvent) {
   const target = event.target as HTMLElement
@@ -96,8 +104,7 @@ function togglePlaces() {
         </ul>
       </div>
       <div class="posted">
-        <template v-if="item.deadline">Due {{ formatDeadline(item.deadline) }}</template>
-        <template v-else>{{ item.posted }}</template>
+        {{ postedLabel }}
       </div>
     </div>
     <ApplyMenu

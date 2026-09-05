@@ -1,4 +1,4 @@
-import type { Internship } from '~/data/listings'
+import { hydratePostedAt, type Internship } from '~/data/listings'
 
 type Snapshot = {
   scrapedAt?: string
@@ -20,8 +20,8 @@ export function useListings() {
     if (!loadPromise) {
       loadPromise = import('~/data/listings.json').then((module) => {
         const raw = module.default as Snapshot
-        listings.value = Array.isArray(raw.listings) ? raw.listings : []
-        scrapedAt.value = raw.scrapedAt ?? ''
+        listings.value = hydratePostedAt(Array.isArray(raw.listings) ? raw.listings : [], raw.scrapedAt)
+        scrapedAt.value = (raw.scrapedAt ?? '').slice(0, 10)
         note.value = raw.note ?? ''
         return listings.value
       }).catch((error) => {

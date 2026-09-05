@@ -59,6 +59,8 @@ export type Internship = {
   location: string
   url: string
   posted: string
+  /** ISO datetime when the role was posted. Used for live “13m ago” labels. */
+  postedAt?: string
   deadline?: string
   season: Season
   track: Track
@@ -369,53 +371,259 @@ function emptyLocationCounts(): Record<LocationId, number> {
   return Object.fromEntries(LOCATION_ORDER.map((id) => [id, 0])) as Record<LocationId, number>
 }
 
-export function facetCounts(listings: Internship[], options: Filters = {}, asOf?: Date): FacetCounts {
-  const who = {
-    all: filterListings(listings, { ...options, who: 'all' }, asOf).length,
-    undergrad: filterListings(listings, { ...options, who: 'undergrad' }, asOf).length,
-    grad: filterListings(listings, { ...options, who: 'grad' }, asOf).length,
-  }
-  const season = {
-    all: filterListings(listings, { ...options, season: 'all' }, asOf).length,
-    summer: filterListings(listings, { ...options, season: 'summer' }, asOf).length,
-    offseason: filterListings(listings, { ...options, season: 'offseason' }, asOf).length,
-  }
-  const posted = {
-    all: filterListings(listings, { ...options, posted: 'all' }, asOf).length,
-    '1d': filterListings(listings, { ...options, posted: '1d' }, asOf).length,
-    '3d': filterListings(listings, { ...options, posted: '3d' }, asOf).length,
-    '7d': filterListings(listings, { ...options, posted: '7d' }, asOf).length,
-    '30d': filterListings(listings, { ...options, posted: '30d' }, asOf).length,
-  }
-  const visa = {
-    all: filterListings(listings, { ...options, visa: 'all' }, asOf).length,
-    open: filterListings(listings, { ...options, visa: 'open' }, asOf).length,
-    auth: filterListings(listings, { ...options, visa: 'auth' }, asOf).length,
-    citizen: filterListings(listings, { ...options, visa: 'citizen' }, asOf).length,
-  }
-  const status = {
-    open: filterListings(listings, { ...options, status: 'open' }, asOf).length,
-    all: filterListings(listings, { ...options, status: 'all' }, asOf).length,
-  }
+function normalizeQuery(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
 
+function tokens(value: string) {
+  return value.toLowerCase().match(/[a-z0-9+#]+/g) ?? []
+}
+
+type ListingIndex = {
+  haystack: string
+  words: string[]
+  who: Who[]
+  locations: LocationId[]
+  family: Family
+}
+
+const listingIndexCache = new WeakMap<Internship, ListingIndex>()
+
+function listingIndex(item: Internship): ListingIndex {
+  const cached = listingIndexCache.get(item)
+  if (cached) {
+    return cached
+  }
+  const family = familyFor(item.track)
+  const haystack = [
+    item.company,
+    item.role,
+    item.location,
+    item.summary,
+    item.keywords,
+    TRACK_LABEL[item.track],
+    FAMILY_LABEL[family],
+    eligibilityLine(item),
+  ]
+    .join(' ')
+    .toLowerCase()
+  const indexed = {
+    haystack,
+    words: tokens(haystack),
+    who: audience(item).who,
+    locations: locationsFor(item.location),
+    family,
+  }
+  listingIndexCache.set(item, indexed)
+  return indexed
+}
+
+function visaMatches(item: Internship, visa: NonNullable<Filters['visa']>) {
+  if (visa === 'citizen') {
+    return item.usCitizen
+  }
+  if (visa === 'auth') {
+    return item.usCitizen || item.noSponsorship
+  }
+  if (visa === 'open') {
+    return !item.usCitizen && !item.noSponsorship
+  }
+  return true
+}
+
+function whoMatches(who: Who[], filter: NonNullable<Filters['who']>) {
+  return filter === 'all' || who.includes(filter)
+}
+
+function postedMatches(item: Internship, posted: PostedWithin, now: Date) {
+  if (posted === 'all') {
+    return true
+  }
+  const age = listingPostedAgeDays(item, now)
+  return age !== null && age <= POSTED_WITHIN_DAYS[posted]
+}
+
+function trackMatches(item: Internship, family: Family, tracks: Track[], families: Family[]) {
+  if (tracks.length) {
+    return tracks.includes(item.track)
+  }
+  if (families.length) {
+    return families.includes(family)
+  }
+  return true
+}
+
+function locationMatches(found: LocationId[], selected: LocationId[]) {
+  return !selected.length || found.some((id) => selected.includes(id))
+}
+
+function companyMatches(company: string, selected: string[]) {
+  return !selected.length || selected.includes(company)
+}
+
+function queryMatchesIndexed(index: ListingIndex, query: string) {
+  if (!query) {
+    return true
+  }
+  if (query.length <= 2) {
+    return index.haystack.includes(query)
+  }
+  const needles = tokens(query)
+  return needles.every((token) => index.words.some((word) => wordMatches(word, token)))
+}
+
+function listingPasses(
+  item: Internship,
+  index: ListingIndex,
+  options: {
+    query: string
+    who: NonNullable<Filters['who']>
+    season: NonNullable<Filters['season']>
+    posted: PostedWithin
+    status: NonNullable<Filters['status']>
+    families: Family[]
+    tracks: Track[]
+    locations: LocationId[]
+    companies: string[]
+    visa: NonNullable<Filters['visa']>
+    now: Date
+  },
+) {
+  if (options.status === 'open' && item.closed) {
+    return false
+  }
+  if (options.season !== 'all' && item.season !== options.season) {
+    return false
+  }
+  if (!postedMatches(item, options.posted, options.now)) {
+    return false
+  }
+  if (!trackMatches(item, index.family, options.tracks, options.families)) {
+    return false
+  }
+  if (!locationMatches(index.locations, options.locations)) {
+    return false
+  }
+  if (!companyMatches(item.company, options.companies)) {
+    return false
+  }
+  if (!whoMatches(index.who, options.who)) {
+    return false
+  }
+  if (!visaMatches(item, options.visa)) {
+    return false
+  }
+  return queryMatchesIndexed(index, options.query)
+}
+
+export function facetCounts(listings: Internship[], options: Filters = {}, asOf?: Date): FacetCounts {
+  const resolved = {
+    query: normalizeQuery(options.query ?? ''),
+    who: options.who ?? 'all',
+    season: options.season ?? 'all',
+    posted: options.posted ?? 'all',
+    status: options.status ?? 'open',
+    families: options.families ?? [],
+    tracks: options.tracks ?? [],
+    locations: options.locations ?? [],
+    companies: options.companies ?? [],
+    visa: options.visa ?? 'all',
+    now: asOf ?? new Date(),
+  }
+  const who = { all: 0, undergrad: 0, grad: 0 }
+  const season = { all: 0, summer: 0, offseason: 0 }
+  const posted = { all: 0, '1d': 0, '3d': 0, '7d': 0, '30d': 0 }
+  const visa = { all: 0, open: 0, auth: 0, citizen: 0 }
+  const status = { open: 0, all: 0 }
   const families = emptyFamilyCounts()
   const tracks: Partial<Record<Track, number>> = {}
-  for (const item of filterListings(listings, { ...options, tracks: [], families: [] }, asOf)) {
-    const family = familyFor(item.track)
-    families[family] += 1
-    tracks[item.track] = (tracks[item.track] ?? 0) + 1
-  }
-
   const locations = emptyLocationCounts()
-  for (const item of filterListings(listings, { ...options, locations: [] }, asOf)) {
-    for (const id of locationsFor(item.location)) {
-      locations[id] += 1
-    }
-  }
-
   const companies: Record<string, number> = {}
-  for (const item of filterListings(listings, { ...options, companies: [] }, asOf)) {
-    companies[item.company] = (companies[item.company] ?? 0) + 1
+
+  for (const item of listings) {
+    const index = listingIndex(item)
+    if (!queryMatchesIndexed(index, resolved.query)) {
+      continue
+    }
+
+    const matchWho = whoMatches(index.who, resolved.who)
+    const matchSeason = resolved.season === 'all' || item.season === resolved.season
+    const matchPosted = postedMatches(item, resolved.posted, resolved.now)
+    const matchStatus = resolved.status !== 'open' || !item.closed
+    const matchTracks = trackMatches(item, index.family, resolved.tracks, resolved.families)
+    const matchLocations = locationMatches(index.locations, resolved.locations)
+    const matchCompanies = companyMatches(item.company, resolved.companies)
+    const matchVisa = visaMatches(item, resolved.visa)
+    const exceptWho = matchSeason && matchPosted && matchStatus && matchTracks && matchLocations && matchCompanies && matchVisa
+    const exceptSeason = matchWho && matchPosted && matchStatus && matchTracks && matchLocations && matchCompanies && matchVisa
+    const exceptPosted = matchWho && matchSeason && matchStatus && matchTracks && matchLocations && matchCompanies && matchVisa
+    const exceptVisa = matchWho && matchSeason && matchPosted && matchStatus && matchTracks && matchLocations && matchCompanies
+    const exceptStatus = matchWho && matchSeason && matchPosted && matchTracks && matchLocations && matchCompanies && matchVisa
+    const exceptTracks = matchWho && matchSeason && matchPosted && matchStatus && matchLocations && matchCompanies && matchVisa
+    const exceptLocations = matchWho && matchSeason && matchPosted && matchStatus && matchTracks && matchCompanies && matchVisa
+    const exceptCompanies = matchWho && matchSeason && matchPosted && matchStatus && matchTracks && matchLocations && matchVisa
+
+    if (exceptWho) {
+      who.all += 1
+      if (index.who.includes('undergrad')) {
+        who.undergrad += 1
+      }
+      if (index.who.includes('grad')) {
+        who.grad += 1
+      }
+    }
+    if (exceptSeason) {
+      season.all += 1
+      season[item.season] += 1
+    }
+    if (exceptPosted) {
+      posted.all += 1
+      const age = listingPostedAgeDays(item, resolved.now)
+      if (age !== null) {
+        if (age <= POSTED_WITHIN_DAYS['1d']) {
+          posted['1d'] += 1
+        }
+        if (age <= POSTED_WITHIN_DAYS['3d']) {
+          posted['3d'] += 1
+        }
+        if (age <= POSTED_WITHIN_DAYS['7d']) {
+          posted['7d'] += 1
+        }
+        if (age <= POSTED_WITHIN_DAYS['30d']) {
+          posted['30d'] += 1
+        }
+      }
+    }
+    if (exceptVisa) {
+      visa.all += 1
+      if (item.usCitizen) {
+        visa.citizen += 1
+      }
+      if (item.usCitizen || item.noSponsorship) {
+        visa.auth += 1
+      }
+      if (!item.usCitizen && !item.noSponsorship) {
+        visa.open += 1
+      }
+    }
+    if (exceptStatus) {
+      status.all += 1
+      if (!item.closed) {
+        status.open += 1
+      }
+    }
+    if (exceptTracks) {
+      families[index.family] += 1
+      tracks[item.track] = (tracks[item.track] ?? 0) + 1
+    }
+    if (exceptLocations) {
+      for (const id of index.locations) {
+        locations[id] += 1
+      }
+    }
+    if (exceptCompanies) {
+      companies[item.company] = (companies[item.company] ?? 0) + 1
+    }
   }
 
   return { who, season, posted, visa, status, families, tracks, locations, companies }
@@ -458,7 +666,11 @@ export function listingSource(item: Internship): { id: string, label: string } {
   if (item.id.startsWith('idealist-') || /idealist\.org/i.test(item.url)) {
     return { id: 'idealist', label: 'Idealist' }
   }
-  if (item.id.startsWith('biotech-') || /myworkdayjobs\.com/i.test(item.url)) {
+  if (
+    item.id.startsWith('biotech-')
+    || item.id.startsWith('company-')
+    || /myworkdayjobs\.com|metacareers\.com|amazon\.jobs|google\.com\/about\/careers/i.test(item.url)
+  ) {
     return { id: 'ats', label: 'Company career page' }
   }
   return { id: 'github', label: 'Public list' }
@@ -489,45 +701,47 @@ function startOfLocalDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 }
 
-/** Milliseconds since the listing was posted. Null when the posted string cannot be read. */
-export function postedAgeMs(posted: string, asOf: Date = new Date()): number | null {
+/** ISO datetime implied by a frozen posted label, anchored to `asOf` (usually scrape time). */
+export function postedAtFromLabel(posted: string, asOf: Date = new Date()): string {
   const value = String(posted || '').trim().toLowerCase()
   if (!value || value === 'date unknown') {
-    return null
+    return ''
   }
   const now = asOf.getTime()
   if (value === 'today' || value === 'just posted') {
-    return now - startOfLocalDay(asOf)
+    return new Date(startOfLocalDay(asOf)).toISOString()
   }
   if (value === 'yesterday') {
-    return now - (startOfLocalDay(asOf) - 86_400_000)
+    return new Date(startOfLocalDay(asOf) - 86_400_000).toISOString()
   }
   if (value === 'recently') {
-    return 2 * 86_400_000
+    return new Date(now - 2 * 86_400_000).toISOString()
   }
   if (/^30\+\s*days?\s*ago$/.test(value)) {
-    return 31 * 86_400_000
+    return new Date(now - 31 * 86_400_000).toISOString()
   }
 
   const relative = value.match(/^(\d+)\s*(mo|h|d|w|m)$/)
   if (relative) {
     const amount = Number(relative[1])
     const unit = relative[2]
-    if (unit === 'm') {
-      return amount * 60_000
-    }
-    if (unit === 'h') {
-      return amount * 3_600_000
-    }
-    if (unit === 'd') {
-      return amount * 86_400_000
-    }
-    if (unit === 'w') {
-      return amount * 7 * 86_400_000
-    }
-    if (unit === 'mo') {
-      return amount * 30 * 86_400_000
-    }
+    const ms = unit === 'm'
+      ? amount * 60_000
+      : unit === 'h'
+        ? amount * 3_600_000
+        : unit === 'd'
+          ? amount * 86_400_000
+          : unit === 'w'
+            ? amount * 7 * 86_400_000
+            : unit === 'mo'
+              ? amount * 30 * 86_400_000
+              : 0
+    return ms ? new Date(now - ms).toISOString() : ''
+  }
+
+  const longDate = Date.parse(String(posted || '').trim())
+  if (Number.isFinite(longDate) && /[0-9]{4}/.test(posted)) {
+    return new Date(longDate).toISOString()
   }
 
   const calendar = value.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})$/)
@@ -535,7 +749,7 @@ export function postedAgeMs(posted: string, asOf: Date = new Date()): number | n
     const month = POSTED_MONTHS[calendar[1].slice(0, 3)]
     const day = Number(calendar[2])
     if (month === undefined || day < 1 || day > 31) {
-      return null
+      return ''
     }
     const today = startOfLocalDay(asOf)
     let year = asOf.getFullYear()
@@ -544,10 +758,57 @@ export function postedAgeMs(posted: string, asOf: Date = new Date()): number | n
       year -= 1
       time = new Date(year, month, day).getTime()
     }
-    return now - time
+    return new Date(time).toISOString()
   }
 
-  return null
+  return ''
+}
+
+function postedAtMs(postedAt?: string): number | null {
+  const time = Date.parse(String(postedAt || ''))
+  return Number.isFinite(time) ? time : null
+}
+
+/** Milliseconds since the listing was posted. Null when the posted string cannot be read. */
+export function postedAgeMs(posted: string, asOf: Date = new Date()): number | null {
+  const iso = postedAtFromLabel(posted, asOf)
+  if (!iso) {
+    return null
+  }
+  return asOf.getTime() - Date.parse(iso)
+}
+
+/** Prefer a stored postedAt, then fall back to parsing the frozen label. */
+export function listingPostedAgeMs(item: Pick<Internship, 'posted' | 'postedAt'>, asOf: Date = new Date()): number | null {
+  const stored = postedAtMs(item.postedAt)
+  if (stored !== null) {
+    return asOf.getTime() - stored
+  }
+  return postedAgeMs(item.posted, asOf)
+}
+
+/** Live compact label: 13m, 2h, 3d, then Aug 21. */
+export function formatPostedAgo(item: Pick<Internship, 'posted' | 'postedAt'>, asOf: Date = new Date()): string {
+  const ms = listingPostedAgeMs(item, asOf)
+  if (ms === null) {
+    return item.posted || ''
+  }
+  const age = Math.max(0, ms)
+  const minutes = Math.floor(age / 60_000)
+  if (minutes < 60) {
+    return `${Math.max(1, minutes)}m`
+  }
+  const hours = Math.floor(age / 3_600_000)
+  if (hours < 24) {
+    return `${hours}h`
+  }
+  const days = Math.floor(age / 86_400_000)
+  if (days < 14) {
+    return `${days}d`
+  }
+  const date = new Date(asOf.getTime() - age)
+  const label = `${DEADLINE_MONTHS[date.getMonth()]} ${date.getDate()}`
+  return date.getFullYear() !== asOf.getFullYear() ? `${label}, ${date.getFullYear()}` : label
 }
 
 /** Days since the listing was posted. Null when the posted string cannot be read. */
@@ -559,6 +820,35 @@ export function postedAgeDays(posted: string, asOf: Date = new Date()): number |
   return Math.floor(ms / 86_400_000)
 }
 
+export function listingPostedAgeDays(item: Pick<Internship, 'posted' | 'postedAt'>, asOf: Date = new Date()): number | null {
+  const ms = listingPostedAgeMs(item, asOf)
+  if (ms === null) {
+    return null
+  }
+  return Math.floor(ms / 86_400_000)
+}
+
+function scrapeAsOf(scrapedAt?: string) {
+  const raw = String(scrapedAt || '').trim()
+  if (!raw) {
+    return new Date()
+  }
+  const date = new Date(raw.length === 10 ? `${raw}T12:00:00` : raw)
+  return Number.isNaN(date.getTime()) ? new Date() : date
+}
+
+/** Fill postedAt from a frozen label when a snapshot predates stored timestamps. */
+export function hydratePostedAt(listings: Internship[], scrapedAt?: string): Internship[] {
+  const asOf = scrapeAsOf(scrapedAt)
+  return listings.map((item) => {
+    if (item.postedAt && postedAtMs(item.postedAt) !== null) {
+      return item
+    }
+    const postedAt = postedAtFromLabel(item.posted, asOf)
+    return postedAt ? { ...item, postedAt } : item
+  })
+}
+
 export function sortListingsByPosted(listings: Internship[], sort: PostedSort = 'none', asOf?: Date) {
   if (sort === 'none') {
     return listings
@@ -566,8 +856,8 @@ export function sortListingsByPosted(listings: Internship[], sort: PostedSort = 
   const now = asOf ?? new Date()
   const dir = sort === 'newest' ? 1 : -1
   return [...listings].sort((a, b) => {
-    const ageA = postedAgeMs(a.posted, now)
-    const ageB = postedAgeMs(b.posted, now)
+    const ageA = listingPostedAgeMs(a, now)
+    const ageB = listingPostedAgeMs(b, now)
     if (ageA === null && ageB === null) {
       return 0
     }
@@ -608,14 +898,6 @@ export function listingSummary(item: Internship): string {
   const due = formatDeadline(item.deadline || '')
   const when = due ? ` Apply by ${due}.` : ''
   return `${field} internship at ${item.company} for ${season}${place}.${when}`
-}
-
-function normalizeQuery(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ')
-}
-
-function tokens(value: string) {
-  return value.toLowerCase().match(/[a-z0-9+#]+/g) ?? []
 }
 
 function maxEdits(len: number) {
@@ -693,87 +975,26 @@ export function queryMatches(haystack: string, query: string) {
   if (!q) {
     return true
   }
-  if (q.length <= 2) {
-    return haystack.toLowerCase().includes(q)
-  }
-  const needles = tokens(q)
-  const words = tokens(haystack)
-  return needles.every((token) => words.some((word) => wordMatches(word, token)))
+  const lower = haystack.toLowerCase()
+  return queryMatchesIndexed({ haystack: lower, words: tokens(lower), who: [], locations: [], family: 'other' }, q)
 }
 
 export function filterListings(listings: Internship[], options: Filters = {}, asOf?: Date) {
-  const query = normalizeQuery(options.query ?? '')
-  const who = options.who ?? 'all'
-  const season = options.season ?? 'all'
-  const posted = options.posted ?? 'all'
-  const status = options.status ?? 'open'
-  const families = options.families ?? []
-  const tracks = options.tracks ?? []
-  const locations = options.locations ?? []
-  const companies = options.companies ?? []
-  const visa = options.visa ?? 'all'
-  const now = asOf ?? new Date()
+  const resolved = {
+    query: normalizeQuery(options.query ?? ''),
+    who: options.who ?? 'all',
+    season: options.season ?? 'all',
+    posted: options.posted ?? 'all',
+    status: options.status ?? 'open',
+    families: options.families ?? [],
+    tracks: options.tracks ?? [],
+    locations: options.locations ?? [],
+    companies: options.companies ?? [],
+    visa: options.visa ?? 'all',
+    now: asOf ?? new Date(),
+  }
 
-  return listings.filter((item) => {
-    if (status === 'open' && item.closed) {
-      return false
-    }
-    if (season !== 'all' && item.season !== season) {
-      return false
-    }
-    if (posted !== 'all') {
-      const age = postedAgeDays(item.posted, now)
-      if (age === null || age > POSTED_WITHIN_DAYS[posted]) {
-        return false
-      }
-    }
-    if (tracks.length) {
-      if (!tracks.includes(item.track)) {
-        return false
-      }
-    }
-    else if (families.length && !families.includes(familyFor(item.track))) {
-      return false
-    }
-    if (locations.length && !locationsFor(item.location).some((id) => locations.includes(id))) {
-      return false
-    }
-    if (companies.length && !companies.includes(item.company)) {
-      return false
-    }
-    const info = audience(item)
-    if (who === 'undergrad' && !info.who.includes('undergrad')) {
-      return false
-    }
-    if (who === 'grad' && !info.who.includes('grad')) {
-      return false
-    }
-    if (visa === 'citizen' && !item.usCitizen) {
-      return false
-    }
-    if (visa === 'auth' && !item.usCitizen && !item.noSponsorship) {
-      return false
-    }
-    if (visa === 'open' && (item.usCitizen || item.noSponsorship)) {
-      return false
-    }
-    if (!query) {
-      return true
-    }
-    const haystack = [
-      item.company,
-      item.role,
-      item.location,
-      item.summary,
-      item.keywords,
-      TRACK_LABEL[item.track],
-      FAMILY_LABEL[familyFor(item.track)],
-      eligibilityLine(item),
-    ]
-      .join(' ')
-      .toLowerCase()
-    return queryMatches(haystack, query)
-  })
+  return listings.filter((item) => listingPasses(item, listingIndex(item), resolved))
 }
 
 export function sidebarFilterCount(options: Filters = {}) {
