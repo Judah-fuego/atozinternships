@@ -1,0 +1,21 @@
+---
+description: Search inputs stay plain — no browser clear (x) control
+globs: app/**/*.{vue,css}
+alwaysApply: true
+---
+
+# Search inputs
+
+Never show the browser’s default search clear control (the blue circled **x**). Search fields are a simple blank underline.
+
+- Use `type="text"` with the `.search` class. Do not use `type="search"` — Chrome/Safari draw a clear button on it.
+- Do not add a custom clear icon unless the user asks for one.
+- The cancel-button reset in `app/assets/css/main.css` is a fallback only. Do not rely on it and reintroduce `type="search"`.
+
+```html
+<!-- BAD: browser draws a blue x once the field has text -->
+<input type="search" placeholder="Search locations…">
+
+<!-- GOOD -->
+<input class="search" type="text" placeholder="Search locations…">
+```
