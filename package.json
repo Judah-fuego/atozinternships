@@ -9,7 +9,7 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "scrape": "node scripts/scrape-internships.mjs",
-    "scrape:summaries": "node scripts/scrape-internships.mjs --enrich-summaries",
+    "scrape:summaries": "node scripts/scrape-internships.mjs --enrich-summaries --force",
     "test": "vitest run"
   },
   "dependencies": {

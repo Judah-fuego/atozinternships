@@ -12,6 +12,7 @@ import {
   type Family,
   type Filters,
   type LocationId,
+  type PostedWithin,
   type Track,
 } from '~/data/listings'
 
@@ -73,6 +74,10 @@ function setSeason(season: Filters['season']) {
   filters.value = { ...filters.value, season }
 }
 
+function setPosted(posted: PostedWithin) {
+  filters.value = { ...filters.value, posted }
+}
+
 function setVisa(visa: Filters['visa']) {
   filters.value = { ...filters.value, visa }
 }
@@ -130,6 +135,7 @@ function clearFilters() {
     query: filters.value.query,
     who: 'all',
     season: 'all',
+    posted: 'all',
     status: 'open',
     tracks: [],
     families: [],
@@ -175,77 +181,39 @@ function clearFilters() {
         </button>
       </div>
 
-      <div class="filter-pair">
-        <div class="filter-group">
-          <span class="filter-label">Who</span>
-          <div class="filter-options is-inline is-pick">
-            <button
-              class="chip"
-              :class="{ 'is-on': (filters.who ?? 'all') === 'all' }"
-              type="button"
-              :aria-pressed="(filters.who ?? 'all') === 'all'"
-              @click="setWho('all')"
-            >
-              All
-              <span class="chip-count">{{ formatCount(counts.who.all) }}</span>
-            </button>
-            <button
-              class="chip"
-              :class="{ 'is-on': filters.who === 'undergrad' }"
-              type="button"
-              :aria-pressed="filters.who === 'undergrad'"
-              @click="setWho('undergrad')"
-            >
-              Undergrad
-              <span class="chip-count">{{ formatCount(counts.who.undergrad) }}</span>
-            </button>
-            <button
-              class="chip"
-              :class="{ 'is-on': filters.who === 'grad' }"
-              type="button"
-              :aria-pressed="filters.who === 'grad'"
-              @click="setWho('grad')"
-            >
-              Grad
-              <span class="chip-count">{{ formatCount(counts.who.grad) }}</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="filter-group">
-          <span class="filter-label">When</span>
-          <div class="filter-options is-inline is-pick">
-            <button
-              class="chip"
-              :class="{ 'is-on': (filters.season ?? 'all') === 'all' }"
-              type="button"
-              :aria-pressed="(filters.season ?? 'all') === 'all'"
-              @click="setSeason('all')"
-            >
-              All
-              <span class="chip-count">{{ formatCount(counts.season.all) }}</span>
-            </button>
-            <button
-              class="chip"
-              :class="{ 'is-on': filters.season === 'summer' }"
-              type="button"
-              :aria-pressed="filters.season === 'summer'"
-              @click="setSeason('summer')"
-            >
-              Summer
-              <span class="chip-count">{{ formatCount(counts.season.summer) }}</span>
-            </button>
-            <button
-              class="chip"
-              :class="{ 'is-on': filters.season === 'offseason' }"
-              type="button"
-              :aria-pressed="filters.season === 'offseason'"
-              @click="setSeason('offseason')"
-            >
-              Fall / Spring
-              <span class="chip-count">{{ formatCount(counts.season.offseason) }}</span>
-            </button>
-          </div>
+      <div class="filter-group">
+        <span class="filter-label">When</span>
+        <div class="filter-options is-inline is-pick">
+          <button
+            class="chip"
+            :class="{ 'is-on': (filters.season ?? 'all') === 'all' }"
+            type="button"
+            :aria-pressed="(filters.season ?? 'all') === 'all'"
+            @click="setSeason('all')"
+          >
+            All
+            <span class="chip-count">{{ formatCount(counts.season.all) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.season === 'summer' }"
+            type="button"
+            :aria-pressed="filters.season === 'summer'"
+            @click="setSeason('summer')"
+          >
+            Summer
+            <span class="chip-count">{{ formatCount(counts.season.summer) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.season === 'offseason' }"
+            type="button"
+            :aria-pressed="filters.season === 'offseason'"
+            @click="setSeason('offseason')"
+          >
+            Fall / Spring
+            <span class="chip-count">{{ formatCount(counts.season.offseason) }}</span>
+          </button>
         </div>
       </div>
 
@@ -310,6 +278,62 @@ function clearFilters() {
       </div>
 
       <div class="filter-group">
+        <span class="filter-label">Posted</span>
+        <div class="filter-options is-inline is-pick">
+          <button
+            class="chip"
+            :class="{ 'is-on': (filters.posted ?? 'all') === 'all' }"
+            type="button"
+            :aria-pressed="(filters.posted ?? 'all') === 'all'"
+            @click="setPosted('all')"
+          >
+            All
+            <span class="chip-count">{{ formatCount(counts.posted.all) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.posted === '1d' }"
+            type="button"
+            :aria-pressed="filters.posted === '1d'"
+            @click="setPosted('1d')"
+          >
+            1 day
+            <span class="chip-count">{{ formatCount(counts.posted['1d']) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.posted === '3d' }"
+            type="button"
+            :aria-pressed="filters.posted === '3d'"
+            @click="setPosted('3d')"
+          >
+            3 days
+            <span class="chip-count">{{ formatCount(counts.posted['3d']) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.posted === '7d' }"
+            type="button"
+            :aria-pressed="filters.posted === '7d'"
+            @click="setPosted('7d')"
+          >
+            Week
+            <span class="chip-count">{{ formatCount(counts.posted['7d']) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.posted === '30d' }"
+            type="button"
+            :aria-pressed="filters.posted === '30d'"
+            @click="setPosted('30d')"
+          >
+            Month
+            <span class="chip-count">{{ formatCount(counts.posted['30d']) }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="filter-group">
         <span class="filter-label">Where</span>
         <FilterSearch
           v-model="selectedLocations"
@@ -327,6 +351,42 @@ function clearFilters() {
           list-id="company-results"
           placeholder="Search companies…"
         />
+      </div>
+
+      <div class="filter-group">
+        <span class="filter-label">Who</span>
+        <div class="filter-options is-inline is-pick">
+          <button
+            class="chip"
+            :class="{ 'is-on': (filters.who ?? 'all') === 'all' }"
+            type="button"
+            :aria-pressed="(filters.who ?? 'all') === 'all'"
+            @click="setWho('all')"
+          >
+            All
+            <span class="chip-count">{{ formatCount(counts.who.all) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.who === 'undergrad' }"
+            type="button"
+            :aria-pressed="filters.who === 'undergrad'"
+            @click="setWho('undergrad')"
+          >
+            Undergrad
+            <span class="chip-count">{{ formatCount(counts.who.undergrad) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.who === 'grad' }"
+            type="button"
+            :aria-pressed="filters.who === 'grad'"
+            @click="setWho('grad')"
+          >
+            Grad
+            <span class="chip-count">{{ formatCount(counts.who.grad) }}</span>
+          </button>
+        </div>
       </div>
 
       <div class="filter-group">

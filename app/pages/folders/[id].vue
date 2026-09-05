@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { eligibilityLine } from '~/data/listings'
-import { ALL_FOLDER_ID, STATUS_LABEL, STATUSES, type Status } from '~/utils/saved'
+import { eligibilityLine, isoDeadline } from '~/data/listings'
+import { ALL_FOLDER_ID, type Status } from '~/utils/saved'
 
 const route = useRoute()
 
@@ -44,8 +44,12 @@ function statusOf(id: string): Status {
   return store.value.items[id]?.status ?? 'saved'
 }
 
-function field(id: string, key: 'appliedOn' | 'followUp' | 'notes' | 'deadline') {
+function field(id: string, key: 'appliedOn' | 'followUp' | 'notes') {
   return store.value.items[id]?.[key] ?? ''
+}
+
+function deadlineOf(item: { id: string, deadline?: string }) {
+  return isoDeadline(store.value.items[item.id]?.deadline) || isoDeadline(item.deadline)
 }
 
 function removeRow(id: string) {
@@ -108,20 +112,11 @@ function removeRow(id: string) {
               :key="item.id"
             >
               <td>
-                <select
-                  :class="`status-${statusOf(item.id)}`"
-                  :value="statusOf(item.id)"
-                  :aria-label="`Status for ${item.role} at ${item.company}`"
-                  @change="saved.patch(item.id, { status: ($event.target as HTMLSelectElement).value as Status })"
-                >
-                  <option
-                    v-for="status in STATUSES"
-                    :key="status"
-                    :value="status"
-                  >
-                    {{ STATUS_LABEL[status] }}
-                  </option>
-                </select>
+                <StatusSelect
+                  :model-value="statusOf(item.id)"
+                  :label="`Status for ${item.role} at ${item.company}`"
+                  @update:model-value="saved.patch(item.id, { status: $event })"
+                />
               </td>
               <td>
                 <div class="sheet-company">
@@ -131,33 +126,33 @@ function removeRow(id: string) {
                     :href="item.url"
                     target="_blank"
                     rel="noopener noreferrer"
-                  >Open</a>
+                    :aria-label="`Apply to ${item.role} at ${item.company}`"
+                  >Apply</a>
                 </div>
               </td>
               <td>{{ item.role }}</td>
               <td>{{ eligibilityLine(item) }}</td>
               <td>{{ item.location }}</td>
               <td>
-                <input
-                  type="date"
-                  :value="field(item.id, 'deadline')"
-                  :aria-label="`Deadline for ${item.role} at ${item.company}`"
-                  @change="saved.patch(item.id, { deadline: ($event.target as HTMLInputElement).value })"
-                >
+                <DateField
+                  :model-value="deadlineOf(item)"
+                  :label="`Deadline for ${item.role} at ${item.company}`"
+                  @update:model-value="saved.patch(item.id, { deadline: $event })"
+                />
               </td>
               <td>
-                <input
-                  type="date"
-                  :value="field(item.id, 'appliedOn')"
-                  @change="saved.patch(item.id, { appliedOn: ($event.target as HTMLInputElement).value })"
-                >
+                <DateField
+                  :model-value="field(item.id, 'appliedOn')"
+                  :label="`Applied date for ${item.role} at ${item.company}`"
+                  @update:model-value="saved.patch(item.id, { appliedOn: $event })"
+                />
               </td>
               <td>
-                <input
-                  type="date"
-                  :value="field(item.id, 'followUp')"
-                  @change="saved.patch(item.id, { followUp: ($event.target as HTMLInputElement).value })"
-                >
+                <DateField
+                  :model-value="field(item.id, 'followUp')"
+                  :label="`Follow-up date for ${item.role} at ${item.company}`"
+                  @update:model-value="saved.patch(item.id, { followUp: $event })"
+                />
               </td>
               <td>
                 <input
@@ -175,10 +170,20 @@ function removeRow(id: string) {
                   @click="removeRow(item.id)"
                 >
                   <span class="sheet-remove-label">Remove</span>
-                  <span
-                    class="sheet-remove-x"
+                  <svg
+                    class="sheet-remove-pen"
+                    viewBox="0 0 16 16"
                     aria-hidden="true"
-                  >×</span>
+                  >
+                    <path
+                      d="M11.2 2.3 13.7 4.8a1 1 0 0 1 0 1.4L6.2 13.7 2.5 14.5l.8-3.7 7.5-7.5a1 1 0 0 1 1.4 0Z"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.4"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
                 </button>
               </td>
             </tr>

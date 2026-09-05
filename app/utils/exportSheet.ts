@@ -1,5 +1,5 @@
 import type { Internship } from '~/data/listings'
-import { eligibilityLine } from '~/data/listings'
+import { eligibilityLine, isoDeadline } from '~/data/listings'
 import { STATUS_LABEL, type SavedItem } from '~/utils/saved'
 
 export type SheetRow = {
@@ -60,7 +60,7 @@ export function buildSheetRows(
         who: eligibilityLine(listing),
         location: listing.location,
         applyUrl: listing.url,
-        deadline: saved?.deadline ?? '',
+        deadline: isoDeadline(saved?.deadline) || isoDeadline(listing.deadline),
         appliedOn: saved?.appliedOn ?? '',
         followUp: saved?.followUp ?? '',
         notes: saved?.notes ?? '',

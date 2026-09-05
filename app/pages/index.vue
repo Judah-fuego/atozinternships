@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { filterListings, sidebarFilterCount, type Filters } from '~/data/listings'
+import { filterListings, sidebarFilterCount, sortListingsByPosted, type Filters, type PostedSort } from '~/data/listings'
 import type { FolderPick } from '~/composables/useSaved'
 
 const PAGE = 40
@@ -12,10 +12,14 @@ const initialQuery = typeof route.query.q === 'string' ? route.query.q : ''
 const filters = ref<Filters>({
   who: 'all',
   season: 'all',
+  posted: 'all',
   status: 'open',
   ...(initialQuery ? { query: initialQuery } : {}),
 })
 const visible = ref(PAGE)
+const postedSort = ref<PostedSort>('none')
+const postedSortOpen = ref(false)
+const postedSortWrap = ref<HTMLElement | null>(null)
 const filtersOpen = ref(false)
 const selecting = ref(false)
 const selected = ref<string[]>([])
@@ -31,9 +35,21 @@ useSiteSeo({
 onMounted(() => {
   void load()
   saved.hydrate()
+  if (import.meta.client) {
+    document.addEventListener('click', onPostedSortDocumentClick)
+  }
 })
 
-const rows = computed(() => filterListings(listings.value, filters.value))
+const rows = computed(() => sortListingsByPosted(filterListings(listings.value, filters.value), postedSort.value))
+const postedSortLabel = computed(() => {
+  if (postedSort.value === 'newest') {
+    return 'newest first'
+  }
+  if (postedSort.value === 'oldest') {
+    return 'oldest first'
+  }
+  return 'default order'
+})
 const filterCount = computed(() => sidebarFilterCount(filters.value))
 const shown = computed(() => rows.value.slice(0, visible.value))
 const openCount = computed(() => listings.value.filter((item) => !item.closed).length)
@@ -43,6 +59,10 @@ const selectedCount = computed(() => selected.value.length)
 watch(filters, () => {
   visible.value = PAGE
 }, { deep: true })
+
+watch(postedSort, () => {
+  visible.value = PAGE
+})
 
 watch(filtersOpen, (open) => {
   if (!import.meta.client) {
@@ -88,6 +108,7 @@ onBeforeUnmount(() => {
   clearTimeout(queryWrite)
   if (import.meta.client) {
     document.body.style.overflow = ''
+    document.removeEventListener('click', onPostedSortDocumentClick)
   }
 })
 
@@ -133,6 +154,18 @@ function toggleSelect(id: string, event?: MouseEvent) {
   selected.value = selectedSet.value.has(id)
     ? selected.value.filter((value) => value !== id)
     : [...selected.value, id]
+}
+
+function onPostedSortDocumentClick(event: MouseEvent) {
+  const wrap = postedSortWrap.value
+  if (wrap && !wrap.contains(event.target as Node)) {
+    postedSortOpen.value = false
+  }
+}
+
+function setPostedSort(sort: Exclude<PostedSort, 'none'>) {
+  postedSort.value = postedSort.value === sort ? 'none' : sort
+  postedSortOpen.value = false
 }
 
 function toggleSelecting() {
@@ -244,7 +277,66 @@ function toggleSelecting() {
           <span>Company</span>
           <span>Role</span>
           <span>Location</span>
-          <span>Posted</span>
+          <div
+            ref="postedSortWrap"
+            class="list-sort-wrap"
+            :class="{ 'is-open': postedSortOpen, 'is-on': postedSort !== 'none' }"
+          >
+            <button
+              class="list-sort"
+              :class="{ 'is-on': postedSort !== 'none' }"
+              type="button"
+              :aria-expanded="postedSortOpen"
+              aria-haspopup="menu"
+              :aria-sort="postedSort === 'newest' ? 'descending' : postedSort === 'oldest' ? 'ascending' : 'none'"
+              :aria-label="`Sort by posted date, ${postedSortLabel}`"
+              @click="postedSortOpen = !postedSortOpen"
+            >
+              Posted
+              <span
+                v-if="postedSort !== 'none'"
+                class="list-sort-mark"
+                aria-hidden="true"
+              >{{ postedSort === 'newest' ? '↓' : '↑' }}</span>
+              <span
+                v-else
+                class="list-sort-hint"
+                aria-hidden="true"
+              >Sort</span>
+            </button>
+            <div
+              class="list-sort-pop"
+              role="menu"
+              aria-label="Sort by posted date"
+            >
+              <button
+                class="apply-choice"
+                :class="{ 'is-on': postedSort === 'newest' }"
+                type="button"
+                role="menuitem"
+                @click="setPostedSort('newest')"
+              >
+                Recent
+                <span
+                  v-if="postedSort === 'newest'"
+                  class="apply-choice-note"
+                >On</span>
+              </button>
+              <button
+                class="apply-choice"
+                :class="{ 'is-on': postedSort === 'oldest' }"
+                type="button"
+                role="menuitem"
+                @click="setPostedSort('oldest')"
+              >
+                Oldest
+                <span
+                  v-if="postedSort === 'oldest'"
+                  class="apply-choice-note"
+                >On</span>
+              </button>
+            </div>
+          </div>
           <span class="list-head-end">Apply</span>
           <span />
         </div>

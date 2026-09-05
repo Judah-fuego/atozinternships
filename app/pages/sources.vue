@@ -1,5 +1,36 @@
 <script setup lang="ts">
+import snapshot from '~/data/listings.json'
+import { queryMatches, type Internship } from '~/data/listings'
+import { companyInternshipBoards } from '~/data/companyBoards'
 import { SITE_NAME, siteUrl } from '~/utils/site'
+
+const boards = companyInternshipBoards((snapshot as { listings?: Internship[] }).listings ?? [])
+const query = ref('')
+const focused = ref(false)
+let blurTimer: ReturnType<typeof setTimeout> | undefined
+
+const matches = computed(() => {
+  const q = query.value.trim()
+  const rows = q
+    ? boards.filter((row) => queryMatches(row.company, q))
+    : boards
+  return rows.slice(0, 8)
+})
+
+function listingsHref(company: string) {
+  return { path: '/', query: { q: company } }
+}
+
+function onBlur() {
+  clearTimeout(blurTimer)
+  blurTimer = setTimeout(() => {
+    focused.value = false
+  }, 150)
+}
+
+onBeforeUnmount(() => {
+  clearTimeout(blurTimer)
+})
 
 useSiteSeo({
   title: 'Internship websites finder',
@@ -37,13 +68,62 @@ useJsonLd('ld-sources-crumbs', {
     <h1>Internship websites</h1>
     <p class="lede">
       A short finder for the internship websites worth using. We ingest public lists and official APIs.
-      When a posting publishes a description on Greenhouse, Lever, Ashby, Workday, or USAJobs, we keep a short summary and skill mentions
+      When a posting publishes a description on Greenhouse, Lever, Ashby, Workday, Oracle Cloud, or USAJobs, we keep a short summary and skill mentions
       so search can find Java, Python, Chinese, and the like. We do not scrape Handshake, LinkedIn, or Indeed.
       Apply on the employer page. These other sites are still worth opening on your own.
       See
       <NuxtLink to="/guide">how to find internships</NuxtLink>
       if you want the order of operations.
     </p>
+
+    <h2>Company internship boards</h2>
+    <p>
+      Look up an employer and open their internship board — the actual jobs, not a search page.
+      If we already have rows for them, you can jump to those too.
+    </p>
+    <div class="board-lookup">
+      <input
+        class="search"
+        type="text"
+        placeholder="Search companies…"
+        :value="query"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        @focus="focused = true"
+        @blur="onBlur"
+        @input="query = ($event.target as HTMLInputElement).value"
+      >
+      <ul
+        v-if="focused || query.trim()"
+        class="board-lookup-list"
+      >
+        <li
+          v-for="row in matches"
+          :key="row.company"
+        >
+          <a
+            :href="row.boardUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+          >{{ row.company }}</a>
+          <span class="board-lookup-meta">
+            internship board
+            <template v-if="row.count">
+              ·
+              <NuxtLink :to="listingsHref(row.company)">{{ row.count.toLocaleString() }} here</NuxtLink>
+            </template>
+          </span>
+        </li>
+        <li
+          v-if="!matches.length"
+          class="board-lookup-empty"
+        >
+          No company board for that name
+        </li>
+      </ul>
+    </div>
+
     <dl class="sources">
       <dt>On this site</dt>
       <dd>
@@ -51,7 +131,7 @@ useJsonLd('ld-sources-crumbs', {
         <a href="https://www.usajobs.gov/" target="_blank" rel="noopener noreferrer">USAJobs</a> college / graduate student Pathways roles,
         <a href="https://www.ycombinator.com/internships" target="_blank" rel="noopener noreferrer">Y Combinator</a> internships,
         <a href="https://www.idealist.org/en/internships" target="_blank" rel="noopener noreferrer">Idealist</a> nonprofit internships,
-        and official company career boards (Greenhouse, Lever, Ashby, Workday) for employers the lists often miss.
+        and official company career boards (Greenhouse, Lever, Ashby, Workday, Oracle Cloud) for employers the lists often miss.
       </dd>
 
       <dt>
@@ -97,7 +177,7 @@ useJsonLd('ld-sources-crumbs', {
       <dd>TrueUp for tech startups. CoolWorks for parks, resorts, and seasonal outdoor work.</dd>
 
       <dt>Company websites</dt>
-      <dd>If you already know the employer, go to their careers page. That is still the source of truth.</dd>
+      <dd>If you already know the employer, use the lookup above. That opens their internship board when we have one.</dd>
     </dl>
   </div>
 </template>

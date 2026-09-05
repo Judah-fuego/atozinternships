@@ -10,6 +10,8 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isAggregatorApplyUrl, isSpecificPostingUrl } from './apply-url.mjs'
+import { parseApplyTarget } from './job-summary.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DATA = join(ROOT, 'app/data/listings.json')
@@ -34,6 +36,7 @@ const DEAD_BODY = [
   /applications? (for this (job|position|role) )?(are|have been) closed/i,
   /page you(?:'| a)?re looking for (doesn'?t|does not) exist/i,
   /<title[^>]*>\s*(page not found|404|job not found)/i,
+  />\s*job not found\s*</i,
 ]
 
 function jobrightMissing(url, body) {
@@ -52,21 +55,37 @@ function workdayUnavailable(url, body) {
   return /\bpostingAvailable:\s*false\b/.test(String(body || ''))
 }
 
-/**
- * Ashby closed postings still return HTTP 200 with a generic "Jobs" title and no og:title
- * (live pages use "{Role} @ {Company}" and fill Open Graph).
- */
-function ashbyUnavailable(url, body) {
+function pageTitle(body) {
+  return String(body || '').match(/<title[^>]*>([^<]*)/i)?.[1]?.replace(/\s+/g, ' ').trim() || ''
+}
+
+function ogTitle(body) {
+  const og = String(body || '').match(
+    /property=["']og:title["'][^>]*content=["']([^"']*)["']|content=["']([^"']*)["'][^>]*property=["']og:title["']/i,
+  )
+  return (og?.[1] || og?.[2] || '').replace(/\s+/g, ' ').trim()
+}
+
+export function ashbyPostingRef(url) {
+  const match = String(url || '').match(/jobs\.ashbyhq\.com\/([^/?#]+)\/([0-9a-f-]{16,})/i)
+  return match ? { board: decodeURIComponent(match[1]), id: match[2] } : null
+}
+
+/** Ashby 200s a board shell for missing jobs. Live pages set "{Role} @ {Company}" + og:title. */
+export function ashbyUnavailable(url, body) {
   if (!/jobs\.ashbyhq\.com/i.test(url)) {
     return false
   }
-  const text = String(body || '')
-  const title = text.match(/<title[^>]*>([^<]*)/i)?.[1]?.trim() || ''
-  const og = text.match(
-    /property=["']og:title["'][^>]*content=["']([^"']*)["']|content=["']([^"']*)["'][^>]*property=["']og:title["']/i,
-  )
-  const ogTitle = (og?.[1] || og?.[2] || '').trim()
-  return /^jobs$/i.test(title) && !ogTitle
+  const title = pageTitle(body)
+  const og = ogTitle(body)
+  if (/job not found/i.test(title) || /job not found/i.test(og)) {
+    return true
+  }
+  return /^jobs$/i.test(title) && !og
+}
+
+export function ashbyJobListed(id, jobs) {
+  return (jobs || []).some((job) => job && job.id === id)
 }
 
 function classifyBody(url, status, body) {
@@ -91,9 +110,75 @@ function classifyBody(url, status, body) {
   return null
 }
 
+async function fetchJson(url) {
+  const res = await fetch(url, {
+    redirect: 'follow',
+    headers: {
+      'user-agent': UA,
+      accept: 'application/json',
+    },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  })
+  const text = await res.text()
+  let json = null
+  try {
+    json = JSON.parse(text)
+  }
+  catch {
+    json = null
+  }
+  return { status: res.status, json, text, url: res.url }
+}
+
+async function liveAshbyIds(board) {
+  try {
+    const { status, json } = await fetchJson(`https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(board)}`)
+    if (status === 200 && Array.isArray(json?.jobs)) {
+      return new Set(json.jobs.map((job) => job.id).filter(Boolean))
+    }
+    return null
+  }
+  catch {
+    return null
+  }
+}
+
+async function probeAtsApi(url) {
+  const target = parseApplyTarget(url)
+  if (!target || (target.kind !== 'greenhouse' && target.kind !== 'lever')) {
+    return null
+  }
+  try {
+    const { status, json } = await fetchJson(target.api)
+    if (DEAD_STATUS.has(status) || status === 404) {
+      return { verdict: 'dead', reason: `${target.kind}-missing`, status, finalUrl: target.api }
+    }
+    if (status === 200 && json && (json.id || json.title)) {
+      return { verdict: 'ok', reason: `${target.kind}-api`, status, finalUrl: target.api }
+    }
+    if (status === 401 || status === 403 || status === 429) {
+      return null
+    }
+    return null
+  }
+  catch {
+    return null
+  }
+}
+
 async function probe(url) {
   if (!url || !/^https:\/\//i.test(url)) {
     return { verdict: 'dead', reason: 'empty-url', status: 0, finalUrl: '' }
+  }
+  if (isAggregatorApplyUrl(url)) {
+    return { verdict: 'dead', reason: 'aggregator', status: 0, finalUrl: url }
+  }
+  if (!isSpecificPostingUrl(url)) {
+    return { verdict: 'dead', reason: 'board-only', status: 0, finalUrl: url }
+  }
+  const api = await probeAtsApi(url)
+  if (api) {
+    return api
   }
   try {
     const res = await fetch(url, {
@@ -148,9 +233,24 @@ async function mapPool(items, limit, fn) {
 
 export async function pruneDeadInternshipListings(listings, { onProgress } = {}) {
   const uniqueUrls = [...new Set(listings.map((item) => item.url || ''))]
+  const ashbyBoards = [...new Set(uniqueUrls.map((url) => ashbyPostingRef(url)?.board).filter(Boolean))]
+  const ashbyLive = new Map()
+  const boardRows = await mapPool(ashbyBoards, 6, async (board) => [board, await liveAshbyIds(board)])
+  for (const [board, ids] of boardRows) {
+    ashbyLive.set(board, ids)
+  }
+
   let done = 0
   const results = await mapPool(uniqueUrls, CONCURRENCY, async (url) => {
-    const result = await probe(url)
+    const ashby = ashbyPostingRef(url)
+    const listed = ashby ? ashbyLive.get(ashby.board) : null
+    let result
+    if (listed?.has(ashby.id)) {
+      result = { verdict: 'ok', reason: 'ashby-api', status: 200, finalUrl: url }
+    }
+    else {
+      result = await probe(url)
+    }
     done += 1
     onProgress?.(done, uniqueUrls.length)
     return { url, ...result }

@@ -18,6 +18,7 @@
  *   node scripts/scrape-internships.mjs --reclassify-only
  *   node scripts/scrape-internships.mjs --enrich-titles-only
  *   node scripts/scrape-internships.mjs --enrich-summaries
+ *   node scripts/scrape-internships.mjs --enrich-summaries --force
  *   node scripts/scrape-internships.mjs --check-links
  *   node scripts/scrape-internships.mjs --company-only
  *
@@ -34,6 +35,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isSpecificPostingUrl } from './apply-url.mjs'
 import { pruneDeadInternshipListings } from './check-internship-links.mjs'
 import { enrichListingSummaries, postingFields } from './job-summary.mjs'
 import { loadEnv } from './load-env.mjs'
@@ -214,6 +216,7 @@ function isOfficialUrl(url) {
     && /^https?:\/\//i.test(url)
     && !/jobright\.ai/i.test(url)
     && !/simplify\.jobs/i.test(url)
+    && !/handshake\.com|linkedin\.com|indeed\.com/i.test(url)
 }
 
 function normalizeUrl(url) {
@@ -2009,12 +2012,16 @@ function enrichExistingTitlesOnly() {
   })()
 }
 
-async function writeSummaryProgress(label, listings) {
+async function writeSummaryProgress(label, listings, { force = false, persist } = {}) {
   process.stdout.write(`${label}\n`)
   const stats = await enrichListingSummaries(listings, {
+    force,
     onProgress(done, total) {
       if (done % 25 === 0 || done === total) {
         process.stdout.write(`  ${done}/${total}\n`)
+      }
+      if (persist && (done % 50 === 0 || done === total)) {
+        persist()
       }
     },
   })
@@ -2025,10 +2032,14 @@ async function writeSummaryProgress(label, listings) {
 function enrichExistingSummariesOnly() {
   return (async () => {
     const raw = JSON.parse(readFileSync(OUT, 'utf8'))
-    await writeSummaryProgress(`Enriching posting summaries in ${OUT}…`, raw.listings)
+    const persist = () => writeFileSync(OUT, `${JSON.stringify(raw, null, 2)}\n`)
+    await writeSummaryProgress(`Enriching posting summaries in ${OUT}…`, raw.listings, {
+      force: process.argv.includes('--force'),
+      persist,
+    })
     const withSummary = raw.listings.filter((item) => item.summary).length
     const withKeywords = raw.listings.filter((item) => item.keywords).length
-    writeFileSync(OUT, `${JSON.stringify(raw, null, 2)}\n`)
+    persist()
     process.stdout.write(`Summaries ${withSummary}/${raw.listings.length} · keywords ${withKeywords}/${raw.listings.length}\n`)
   })()
 }
@@ -2087,7 +2098,7 @@ async function main() {
     process.stdout.write('Fetching official company career boards…\n')
     const company = await fetchCompanyInternships()
     const listings = mergeListings(raw.listings || [], company)
-      .filter((item) => /^https:\/\//i.test(item.url))
+      .filter((item) => isSpecificPostingUrl(item.url))
     const openCount = listings.filter((item) => !item.closed).length
     const payload = {
       ...raw,
@@ -2126,7 +2137,7 @@ async function main() {
   const jobright = parseJobrightTable(jobrightMd)
   const zapply = parseZapplyTables(zapplyMd)
   let listings = mergeListings(vansh, simplify, jobright, zapply, usajobs, biotech, yc, idealist, company)
-    .filter((item) => /^https:\/\//i.test(item.url))
+    .filter((item) => isSpecificPostingUrl(item.url))
   if (process.argv.includes('--check-links')) {
     process.stdout.write(`Checking ${listings.length} apply links…\n`)
     const pruned = await pruneDeadInternshipListings(listings, {

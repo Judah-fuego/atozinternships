@@ -69,16 +69,27 @@ export type Internship = {
   keywords?: string
 }
 
+export type PostedWithin = 'all' | '1d' | '3d' | '7d' | '30d'
+export type PostedSort = 'none' | 'newest' | 'oldest'
+
 export type Filters = {
   query?: string
   who?: Who | 'all'
   season?: Season | 'all'
+  posted?: PostedWithin
   families?: Family[]
   tracks?: Track[]
   locations?: LocationId[]
   companies?: string[]
   visa?: 'all' | 'citizen' | 'auth' | 'open'
   status?: 'open' | 'all'
+}
+
+export const POSTED_WITHIN_DAYS: Record<Exclude<PostedWithin, 'all'>, number> = {
+  '1d': 1,
+  '3d': 3,
+  '7d': 7,
+  '30d': 30,
 }
 
 export const SEASON_LABEL: Record<Season, string> = {
@@ -341,6 +352,7 @@ export function uniqueCompanies(listings: Internship[]): string[] {
 export type FacetCounts = {
   who: Record<'all' | Who, number>
   season: Record<'all' | Season, number>
+  posted: Record<PostedWithin, number>
   visa: Record<'all' | 'citizen' | 'auth' | 'open', number>
   status: Record<'open' | 'all', number>
   families: Record<Family, number>
@@ -357,49 +369,56 @@ function emptyLocationCounts(): Record<LocationId, number> {
   return Object.fromEntries(LOCATION_ORDER.map((id) => [id, 0])) as Record<LocationId, number>
 }
 
-export function facetCounts(listings: Internship[], options: Filters = {}): FacetCounts {
+export function facetCounts(listings: Internship[], options: Filters = {}, asOf?: Date): FacetCounts {
   const who = {
-    all: filterListings(listings, { ...options, who: 'all' }).length,
-    undergrad: filterListings(listings, { ...options, who: 'undergrad' }).length,
-    grad: filterListings(listings, { ...options, who: 'grad' }).length,
+    all: filterListings(listings, { ...options, who: 'all' }, asOf).length,
+    undergrad: filterListings(listings, { ...options, who: 'undergrad' }, asOf).length,
+    grad: filterListings(listings, { ...options, who: 'grad' }, asOf).length,
   }
   const season = {
-    all: filterListings(listings, { ...options, season: 'all' }).length,
-    summer: filterListings(listings, { ...options, season: 'summer' }).length,
-    offseason: filterListings(listings, { ...options, season: 'offseason' }).length,
+    all: filterListings(listings, { ...options, season: 'all' }, asOf).length,
+    summer: filterListings(listings, { ...options, season: 'summer' }, asOf).length,
+    offseason: filterListings(listings, { ...options, season: 'offseason' }, asOf).length,
+  }
+  const posted = {
+    all: filterListings(listings, { ...options, posted: 'all' }, asOf).length,
+    '1d': filterListings(listings, { ...options, posted: '1d' }, asOf).length,
+    '3d': filterListings(listings, { ...options, posted: '3d' }, asOf).length,
+    '7d': filterListings(listings, { ...options, posted: '7d' }, asOf).length,
+    '30d': filterListings(listings, { ...options, posted: '30d' }, asOf).length,
   }
   const visa = {
-    all: filterListings(listings, { ...options, visa: 'all' }).length,
-    open: filterListings(listings, { ...options, visa: 'open' }).length,
-    auth: filterListings(listings, { ...options, visa: 'auth' }).length,
-    citizen: filterListings(listings, { ...options, visa: 'citizen' }).length,
+    all: filterListings(listings, { ...options, visa: 'all' }, asOf).length,
+    open: filterListings(listings, { ...options, visa: 'open' }, asOf).length,
+    auth: filterListings(listings, { ...options, visa: 'auth' }, asOf).length,
+    citizen: filterListings(listings, { ...options, visa: 'citizen' }, asOf).length,
   }
   const status = {
-    open: filterListings(listings, { ...options, status: 'open' }).length,
-    all: filterListings(listings, { ...options, status: 'all' }).length,
+    open: filterListings(listings, { ...options, status: 'open' }, asOf).length,
+    all: filterListings(listings, { ...options, status: 'all' }, asOf).length,
   }
 
   const families = emptyFamilyCounts()
   const tracks: Partial<Record<Track, number>> = {}
-  for (const item of filterListings(listings, { ...options, tracks: [], families: [] })) {
+  for (const item of filterListings(listings, { ...options, tracks: [], families: [] }, asOf)) {
     const family = familyFor(item.track)
     families[family] += 1
     tracks[item.track] = (tracks[item.track] ?? 0) + 1
   }
 
   const locations = emptyLocationCounts()
-  for (const item of filterListings(listings, { ...options, locations: [] })) {
+  for (const item of filterListings(listings, { ...options, locations: [] }, asOf)) {
     for (const id of locationsFor(item.location)) {
       locations[id] += 1
     }
   }
 
   const companies: Record<string, number> = {}
-  for (const item of filterListings(listings, { ...options, companies: [] })) {
+  for (const item of filterListings(listings, { ...options, companies: [] }, asOf)) {
     companies[item.company] = (companies[item.company] ?? 0) + 1
   }
 
-  return { who, season, visa, status, families, tracks, locations, companies }
+  return { who, season, posted, visa, status, families, tracks, locations, companies }
 }
 
 export function parsePlaces(location: string): {
@@ -447,9 +466,9 @@ export function listingSource(item: Internship): { id: string, label: string } {
 
 const DEADLINE_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-/** Format a stored YYYY-MM-DD application due date for the list. */
-export function formatDeadline(iso: string): string {
-  const match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+/** Keep a stored YYYY-MM-DD only when it is a real date. Never invent one. */
+export function isoDeadline(value?: string): string {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
   if (!match) {
     return ''
   }
@@ -459,6 +478,119 @@ export function formatDeadline(iso: string): string {
   if (month < 0 || month > 11 || day < 1 || day > 31) {
     return ''
   }
+  return `${match[1]}-${match[2]}-${match[3]}`
+}
+
+const POSTED_MONTHS: Record<string, number> = Object.fromEntries(
+  DEADLINE_MONTHS.map((label, index) => [label.toLowerCase(), index]),
+)
+
+function startOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+}
+
+/** Milliseconds since the listing was posted. Null when the posted string cannot be read. */
+export function postedAgeMs(posted: string, asOf: Date = new Date()): number | null {
+  const value = String(posted || '').trim().toLowerCase()
+  if (!value || value === 'date unknown') {
+    return null
+  }
+  const now = asOf.getTime()
+  if (value === 'today' || value === 'just posted') {
+    return now - startOfLocalDay(asOf)
+  }
+  if (value === 'yesterday') {
+    return now - (startOfLocalDay(asOf) - 86_400_000)
+  }
+  if (value === 'recently') {
+    return 2 * 86_400_000
+  }
+  if (/^30\+\s*days?\s*ago$/.test(value)) {
+    return 31 * 86_400_000
+  }
+
+  const relative = value.match(/^(\d+)\s*(mo|h|d|w|m)$/)
+  if (relative) {
+    const amount = Number(relative[1])
+    const unit = relative[2]
+    if (unit === 'm') {
+      return amount * 60_000
+    }
+    if (unit === 'h') {
+      return amount * 3_600_000
+    }
+    if (unit === 'd') {
+      return amount * 86_400_000
+    }
+    if (unit === 'w') {
+      return amount * 7 * 86_400_000
+    }
+    if (unit === 'mo') {
+      return amount * 30 * 86_400_000
+    }
+  }
+
+  const calendar = value.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})$/)
+  if (calendar) {
+    const month = POSTED_MONTHS[calendar[1].slice(0, 3)]
+    const day = Number(calendar[2])
+    if (month === undefined || day < 1 || day > 31) {
+      return null
+    }
+    const today = startOfLocalDay(asOf)
+    let year = asOf.getFullYear()
+    let time = new Date(year, month, day).getTime()
+    if (time > today + 86_400_000) {
+      year -= 1
+      time = new Date(year, month, day).getTime()
+    }
+    return now - time
+  }
+
+  return null
+}
+
+/** Days since the listing was posted. Null when the posted string cannot be read. */
+export function postedAgeDays(posted: string, asOf: Date = new Date()): number | null {
+  const ms = postedAgeMs(posted, asOf)
+  if (ms === null) {
+    return null
+  }
+  return Math.floor(ms / 86_400_000)
+}
+
+export function sortListingsByPosted(listings: Internship[], sort: PostedSort = 'none', asOf?: Date) {
+  if (sort === 'none') {
+    return listings
+  }
+  const now = asOf ?? new Date()
+  const dir = sort === 'newest' ? 1 : -1
+  return [...listings].sort((a, b) => {
+    const ageA = postedAgeMs(a.posted, now)
+    const ageB = postedAgeMs(b.posted, now)
+    if (ageA === null && ageB === null) {
+      return 0
+    }
+    if (ageA === null) {
+      return 1
+    }
+    if (ageB === null) {
+      return -1
+    }
+    return (ageA - ageB) * dir
+  })
+}
+
+/** Format a stored YYYY-MM-DD application due date for the list. */
+export function formatDeadline(iso: string): string {
+  const value = isoDeadline(iso)
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) {
+    return ''
+  }
+  const year = Number(match[1])
+  const month = Number(match[2]) - 1
+  const day = Number(match[3])
   const label = `${DEADLINE_MONTHS[month]} ${day}`
   return year !== new Date().getUTCFullYear() ? `${label}, ${year}` : label
 }
@@ -569,16 +701,18 @@ export function queryMatches(haystack: string, query: string) {
   return needles.every((token) => words.some((word) => wordMatches(word, token)))
 }
 
-export function filterListings(listings: Internship[], options: Filters = {}) {
+export function filterListings(listings: Internship[], options: Filters = {}, asOf?: Date) {
   const query = normalizeQuery(options.query ?? '')
   const who = options.who ?? 'all'
   const season = options.season ?? 'all'
+  const posted = options.posted ?? 'all'
   const status = options.status ?? 'open'
   const families = options.families ?? []
   const tracks = options.tracks ?? []
   const locations = options.locations ?? []
   const companies = options.companies ?? []
   const visa = options.visa ?? 'all'
+  const now = asOf ?? new Date()
 
   return listings.filter((item) => {
     if (status === 'open' && item.closed) {
@@ -586,6 +720,12 @@ export function filterListings(listings: Internship[], options: Filters = {}) {
     }
     if (season !== 'all' && item.season !== season) {
       return false
+    }
+    if (posted !== 'all') {
+      const age = postedAgeDays(item.posted, now)
+      if (age === null || age > POSTED_WITHIN_DAYS[posted]) {
+        return false
+      }
     }
     if (tracks.length) {
       if (!tracks.includes(item.track)) {
@@ -642,6 +782,9 @@ export function sidebarFilterCount(options: Filters = {}) {
     count += 1
   }
   if (options.season && options.season !== 'all') {
+    count += 1
+  }
+  if (options.posted && options.posted !== 'all') {
     count += 1
   }
   if (options.tracks?.length || options.families?.length) {
