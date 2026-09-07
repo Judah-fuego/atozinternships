@@ -28,6 +28,8 @@ export type Folder = { id: string, name: string }
 export type SavedItem = {
   folderIds: string[]
   status: Status
+  /** City the student picked when the posting lists several. */
+  location: string
   appliedOn: string
   followUp: string
   notes: string
@@ -51,7 +53,8 @@ function newFolderId() {
 function emptyItem(): SavedItem {
   return {
     folderIds: [],
-    status: 'saved',
+    status: 'applying',
+    location: '',
     appliedOn: '',
     followUp: '',
     notes: '',
@@ -100,15 +103,16 @@ function sanitize(value: unknown): SavedStore {
         continue
       }
       const item = entry as Record<string, unknown>
-      const status = STATUSES.includes(item.status as Status) ? item.status as Status : 'saved'
+      const status = STATUSES.includes(item.status as Status) ? item.status as Status : 'applying'
       items[id] = {
         folderIds: Array.isArray(item.folderIds)
           ? item.folderIds.filter((folderId): folderId is string => typeof folderId === 'string' && folderIds.has(folderId))
           : [],
         status,
+        location: typeof item.location === 'string' ? item.location.slice(0, 120) : '',
         appliedOn: typeof item.appliedOn === 'string' ? item.appliedOn : '',
         followUp: typeof item.followUp === 'string' ? item.followUp : '',
-        notes: typeof item.notes === 'string' ? item.notes.slice(0, 2000) : '',
+        notes: typeof item.notes === 'string' ? item.notes.slice(0, 4000) : '',
         deadline: typeof item.deadline === 'string' ? item.deadline : '',
       }
     }

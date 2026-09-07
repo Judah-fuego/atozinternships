@@ -34,8 +34,12 @@ const COMPANY_DOMAIN_ALIASES: Record<string, string> = {
   canva: 'canva.com',
   'epic games': 'epicgames.com',
   google: 'google.com',
+  'eli lilly': 'lilly.com',
+  'general motors': 'gm.com',
   'hudson river trading': 'hudsonrivertrading.com',
   'jane street': 'janestreet.com',
+  'johnson and johnson': 'jnj.com',
+  jnj: 'jnj.com',
   'jp morgan chase': 'jpmorganchase.com',
   'jpmorgan chase': 'jpmorganchase.com',
   'jump trading': 'jumptrading.com',
@@ -46,6 +50,9 @@ const COMPANY_DOMAIN_ALIASES: Record<string, string> = {
   roblox: 'roblox.com',
   tesla: 'tesla.com',
   tiktok: 'tiktok.com',
+  'un volunteers': 'unv.org',
+  'united nations': 'un.org',
+  'united nations volunteers': 'unv.org',
 }
 
 const LEGAL_SUFFIX =

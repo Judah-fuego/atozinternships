@@ -4,9 +4,11 @@ import {
   eligibilityLine,
   formatDeadline,
   formatPostedAgo,
+  listingPayLine,
   listingSource,
   listingSummary,
   parsePlaces,
+  seasonLabelFor,
   type Internship,
 } from '~/data/listings'
 
@@ -139,13 +141,43 @@ function togglePlaces() {
       v-if="open"
       class="detail"
     >
-      <p>{{ listingSummary(item) }}</p>
-      <p v-if="item.keywords">
-        Mentions {{ item.keywords }}.
-      </p>
-      <p>
+      <div class="detail-block">
+        <span class="detail-label">About</span>
+        <p class="detail-about">
+          {{ listingSummary(item) }}
+        </p>
+      </div>
+      <div
+        v-if="item.requirements"
+        class="detail-block"
+      >
+        <span class="detail-label">Requirements</span>
+        <p class="detail-fact">
+          {{ item.requirements }}
+        </p>
+      </div>
+      <div
+        v-if="item.keywords"
+        class="detail-block"
+      >
+        <span class="detail-label">Skills</span>
+        <p class="detail-fact">
+          {{ item.keywords }}
+        </p>
+      </div>
+      <div
+        v-if="listingPayLine(item)"
+        class="detail-block"
+      >
+        <span class="detail-label">Pay</span>
+        <p class="detail-fact">
+          {{ listingPayLine(item) }}
+        </p>
+      </div>
+      <p class="detail-meta">
         {{ eligibilityLine(item) }}
         · {{ TRACK_LABEL[item.track] }}
+        · {{ seasonLabelFor(item) }}
         · {{ source.label }}
         <template v-if="item.closed">
           · Closed

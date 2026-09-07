@@ -9,22 +9,26 @@ import {
   formatDeadline,
   isoDeadline,
   levelsFromRole,
+  listingPayLine,
   listingSource,
   listingSummary,
   parsePlaces,
   formatPostedAgo,
+  formatTermLabel,
   hydratePostedAt,
   listingPostedAgeMs,
   postedAgeDays,
+  queryMatches,
+  seasonLabelFor,
   sidebarFilterCount,
   sortListingsByPosted,
   uniqueCompanies,
   visaLabel,
   type Internship,
 } from '../app/data/listings'
-import { extractKeywords, isWeakSummary, parseApplyTarget, summarizePosting } from '../scripts/job-summary.mjs'
-import { internshipBoardForCompany, isSpecificPostingUrl } from '../scripts/apply-url.mjs'
-import { ashbyJobListed, ashbyUnavailable } from '../scripts/check-internship-links.mjs'
+import { extractKeywords, extractPay, extractRequirements, extractDeadline, extractInternshipTerm, isWeakSummary, parseApplyTarget, parseDeadlineDate, postingFields, summarizePosting } from '../scripts/job-summary.mjs'
+import { companyInternshipBoards, internshipBoardForCompany, isSpecificPostingUrl } from '../scripts/apply-url.mjs'
+import { adpRecruitmentRef, ashbyJobListed, ashbyUnavailable } from '../scripts/check-internship-links.mjs'
 
 function listing(partial: Partial<Internship> = {}): Internship {
   return {
@@ -127,6 +131,16 @@ describe('filterListings', () => {
     expect(ids).toEqual(['b'])
   })
 
+  it('sources filter keeps listings from those boards', () => {
+    const mixed = [
+      listing({ id: 'yc-1', url: 'https://www.ycombinator.com/companies/acme/jobs/1' }),
+      listing({ id: 'usajobs-1', url: 'https://www.usajobs.gov/job/1' }),
+      listing({ id: 'public-1', url: 'https://example.com/job' }),
+    ]
+    expect(filterListings(mixed, { sources: ['yc'] }).map((item) => item.id)).toEqual(['yc-1'])
+    expect(filterListings(mixed, { sources: ['yc', 'usajobs'] }).map((item) => item.id)).toEqual(['yc-1', 'usajobs-1'])
+  })
+
   it('posted filter keeps listings within the selected window', () => {
     const asOf = new Date(2026, 8, 5)
     const mixed = [
@@ -140,6 +154,31 @@ describe('filterListings', () => {
     expect(filterListings(mixed, { posted: '1d' }, asOf).map((item) => item.id)).toEqual(['today', 'hours', 'yesterday'])
     expect(filterListings(mixed, { posted: '7d' }, asOf).map((item) => item.id)).toEqual(['today', 'hours', 'yesterday', 'week'])
     expect(filterListings(mixed, { posted: '30d' }, asOf).map((item) => item.id)).toEqual(['today', 'hours', 'yesterday', 'week'])
+  })
+
+  it('pay filters keep disclosed and min hourly roles', () => {
+    const mixed = [
+      listing({ id: 'paid', payText: '$57–$61/hr', payMin: 57, payMax: 61, payUnit: 'hour' }),
+      listing({ id: 'low', payText: '$35/hr', payMin: 35, payMax: 35, payUnit: 'hour' }),
+      listing({ id: 'yearly', payText: '$80,000/yr', payMin: 80000, payMax: 80000, payUnit: 'year' }),
+      listing({ id: 'none' }),
+    ]
+    expect(filterListings(mixed, { pay: 'disclosed' }).map((item) => item.id)).toEqual(['paid', 'low', 'yearly'])
+    expect(filterListings(mixed, { minHourly: 50 }).map((item) => item.id)).toEqual(['paid'])
+    expect(listingPayLine(mixed[0])).toMatch(/\$57/)
+  })
+
+  it('hides postings older than a year from browse while keeping unknown ages', () => {
+    const asOf = new Date('2026-09-06T12:00:00.000Z')
+    const day = 86_400_000
+    const mixed = [
+      listing({ id: 'fresh', posted: 'Sep 1', postedAt: new Date(asOf.getTime() - 5 * day).toISOString() }),
+      listing({ id: 'edge', posted: 'Sep 6, 2025', postedAt: new Date(asOf.getTime() - 365 * day).toISOString() }),
+      listing({ id: 'stale', posted: 'Aug 5, 2024', postedAt: new Date(asOf.getTime() - 366 * day).toISOString() }),
+      listing({ id: 'unknown', posted: '' }),
+    ]
+    expect(filterListings(mixed, { status: 'all' }, asOf).map((item) => item.id)).toEqual(['fresh', 'edge', 'unknown'])
+    expect(facetCounts(mixed, { status: 'all' }, asOf).who.all).toBe(3)
   })
 })
 
@@ -158,9 +197,19 @@ describe('sidebarFilterCount', () => {
     expect(sidebarFilterCount({ companies: ['Acme'], locations: ['new-york'] })).toBe(2)
   })
 
+  it('counts a source filter once', () => {
+    expect(sidebarFilterCount({ sources: ['yc', 'usajobs'] })).toBe(1)
+    expect(sidebarFilterCount({ sources: [] })).toBe(0)
+  })
+
   it('counts a posted recency filter', () => {
     expect(sidebarFilterCount({ posted: '7d' })).toBe(1)
     expect(sidebarFilterCount({ posted: 'all' })).toBe(0)
+  })
+
+  it('counts pay filters', () => {
+    expect(sidebarFilterCount({ pay: 'disclosed', minHourly: 50 })).toBe(2)
+    expect(sidebarFilterCount({ pay: 'all', minHourly: undefined })).toBe(0)
   })
 })
 
@@ -266,6 +315,19 @@ describe('facetCounts', () => {
     expect(counts.status.all).toBe(filterListings(rows, { ...options, status: 'all' }).length)
     expect(counts.companies.Acme).toBe(1)
   })
+
+  it('counts sources without applying the current source filter', () => {
+    const rows = [
+      listing({ id: 'yc-1', url: 'https://www.ycombinator.com/companies/acme/jobs/1' }),
+      listing({ id: 'usajobs-1', url: 'https://www.usajobs.gov/job/1' }),
+      listing({ id: 'public-1', url: 'https://example.com/job' }),
+    ]
+    const counts = facetCounts(rows, { sources: ['yc'] })
+    expect(counts.sources.yc).toBe(1)
+    expect(counts.sources.usajobs).toBe(1)
+    expect(counts.sources.github).toBe(1)
+    expect(counts.who.all).toBe(1)
+  })
 })
 
 describe('tracks', () => {
@@ -310,6 +372,10 @@ describe('listingSource', () => {
       id: 'company-google-software-engineer-intern-mountain-view',
       url: 'https://www.google.com/about/careers/applications/jobs/results/1-software-engineering-intern',
     })).label).toBe('Company career page')
+    expect(listingSource(listing({
+      id: 'yc-75704',
+      url: 'https://www.ycombinator.com/companies/safetykit/jobs/eQpUzRD-full-stack-engineer-intern-summer-2026',
+    }))).toEqual({ id: 'yc', label: 'Y Combinator' })
   })
 })
 
@@ -341,6 +407,53 @@ describe('listingSummary', () => {
 
   it('falls back to a generated line', () => {
     expect(listingSummary(listing())).toContain('Software internship at Acme')
+    expect(listingSummary(listing())).toMatch(/Summer '27/)
+  })
+
+  it('prefers a concrete cohort term in the fallback line', () => {
+    expect(formatTermLabel('Summer 2027')).toBe("Summer '27")
+    expect(formatTermLabel('Fall 2026')).toBe("Fall '26")
+    expect(seasonLabelFor(listing({ term: 'Winter 2027', season: 'offseason' }))).toBe("Winter '27")
+    expect(listingSummary(listing({
+      summary: '',
+      term: 'Fall 2026',
+      season: 'offseason',
+    }))).toContain("Fall '26")
+  })
+})
+
+describe('listingPayLine', () => {
+  it('keeps short clean pay text', () => {
+    expect(listingPayLine(listing({
+      payText: '$57–$61/hr',
+      payMin: 57,
+      payMax: 61,
+      payUnit: 'hour',
+    }))).toBe('$57–$61/hr')
+  })
+
+  it('formats from numbers when payText is scrape noise', () => {
+    expect(listingPayLine(listing({
+      payText: 'n, certifications, etc. $37,440 - $96,800 per year Description of Benefits Humana, Inc. and its af',
+      payMin: 37440,
+      payMax: 96800,
+      payUnit: 'year',
+    }))).toBe('$37,440–$96,800/yr')
+  })
+
+  it('hides zero and false-positive pay', () => {
+    expect(listingPayLine(listing({
+      payText: 'NAVAILABLE Compensation $0/yr',
+      payMin: 0,
+      payMax: 0,
+      payUnit: 'year',
+    }))).toBe('')
+    expect(listingPayLine(listing({
+      payText: 'contribute more than $1.5 trillion in network volume',
+      payMin: 1.5,
+      payMax: 1.5,
+      payUnit: 'year',
+    }))).toBe('')
   })
 })
 
@@ -348,11 +461,18 @@ describe('posting text', () => {
   it('pulls Java, Python, and Chinese out of a job description', () => {
     const text = 'Required: Java and Python. Mandarin Chinese is a plus. Equal opportunity employer.'
     expect(extractKeywords(text)).toBe('Python, Java, Chinese')
-    expect(summarizePosting(text)).toMatch(/Java and Python/i)
-    expect(summarizePosting(text)).not.toMatch(/equal opportunity/i)
+    // Skills alone are not an About blurb — they show under Skills.
+    expect(summarizePosting(text)).toBe('')
   })
 
-  it('keeps what you will do and skills, not culture or apply-page filler', () => {
+  it('keeps Spanish only when it is a real skill, not a PDF link', () => {
+    expect(extractKeywords('Download the Spanish PDF of this job description. Required: Python.')).toBe('Python')
+    expect(extractKeywords('Fluent in Spanish and Portuguese. Experience with Excel.')).toBe('Excel, Spanish, Portuguese')
+    expect(extractKeywords('Provide mentorship to Spanish-speaking clients.')).toBe('Spanish')
+    expect(extractKeywords('View Spanish translation of this posting.')).toBe('')
+  })
+
+  it('keeps what you will do as the main blurb, not culture or skills', () => {
     const text = `
       Our Culture We promote a diverse and inclusive environment and commit to responsibility for our communities.
       What You Will Do
@@ -364,10 +484,59 @@ describe('posting text', () => {
     `
     const summary = summarizePosting(text)
     expect(summary).toMatch(/design and develop production systems/i)
-    expect(summary).toMatch(/python/i)
+    expect(summary).toMatch(/build apis/i)
+    expect(summary).not.toMatch(/relevant skills/i)
     expect(summary).not.toMatch(/our culture/i)
     expect(summary).not.toMatch(/click the link/i)
     expect(extractKeywords(text)).toBe('Python, Java')
+    expect(isWeakSummary('Strong programming skills in Python, C++, or Java, with a focus on writing production-quality code. Relevant skills: Python, Java.')).toBe(true)
+  })
+
+  it('puts what you get to work on first and skips conference perks', () => {
+    const text = `
+      What you'll get to work on
+      Build and operate training, data, or evaluation infrastructure used daily by the wider SW team.
+      Work with GPU clusters, orchestration, and data pipelines at scale.
+      Instrument, monitor, and harden the pipeline you ship.
+      Test your work on real robots at the office.
+      Opportunity to publish (for PhD interns).
+      Attend Tier-1 industry conferences.
+      Qualifications
+      Strong Python; familiarity with cloud services (AWS/GCP), containers, and CI/CD.
+    `
+    const summary = summarizePosting(text)
+    expect(summary).toMatch(/build and operate training/i)
+    expect(summary).toMatch(/gpu clusters|data pipelines|harden the pipeline/i)
+    expect(summary.length).toBeGreaterThan(200)
+    expect(summary).not.toMatch(/^what you(?:'|’)ll get to work on/i)
+    expect(summary).not.toMatch(/opportunity to publish/i)
+    expect(summary).not.toMatch(/tier-1|conferences/i)
+    expect(summary).not.toMatch(/relevant skills/i)
+    expect(isWeakSummary('What you\'ll get to work on. Strong Python; familiarity with cloud services (AWS/GCP), containers, and CI/CD. Relevant skills: Python.')).toBe(true)
+  })
+
+  it('keeps a long what-you-ll-do block from star bullets like Eightfold postings', () => {
+    const text = `
+What You’ll Do
+
+  * Design and develop production systems for model deployment, serving, and monitoring at scale
+  * Build APIs and services that expose statistical models, risk calculations, and portfolio analytics to trading systems
+  * Productionize research models by optimizing performance, strengthening error handling, and ensuring numerical stability
+  * Develop high-performance infrastructure for real-time pricing, risk calculations, and portfolio optimization
+  * Build data pipelines and quantitative tools that support back-testing, statistical analysis, market simulation, and model inference
+
+What You Bring
+
+  * Strong programming skills in Python, C++, or Java, with a focus on writing production-quality code
+  * Pursuing a Bachelor’s or Master’s degree in Computer Science, Mathematics, Physics, Engineering, or a related quantitative field
+    `
+    const summary = summarizePosting(text)
+    expect(summary).toMatch(/design and develop production systems/i)
+    expect(summary).toMatch(/build apis/i)
+    expect(summary).toMatch(/data pipelines/i)
+    expect(summary).not.toMatch(/strong programming/i)
+    expect(summary).not.toMatch(/relevant skills/i)
+    expect(extractKeywords(text)).toMatch(/Python/)
   })
 
   it('drops view-our-opening filler instead of keeping it as the description', () => {
@@ -387,6 +556,100 @@ describe('posting text', () => {
     expect(summary).not.toMatch(/internship credit/i)
   })
 
+  it('extracts dual hourly rates into pay fields', () => {
+    const text = 'In San Francisco or New York City, the estimated hourly range for this role is $57/hr for Bachelors and $61/hr for Master’s.'
+    const pay = extractPay(text)
+    expect(pay.payMin).toBe(57)
+    expect(pay.payMax).toBe(61)
+    expect(pay.payUnit).toBe('hour')
+    expect(pay.payText).toBe('$57–$61/hr')
+  })
+
+  it('extracts graduation and degree requirements, not soft-skill walls', () => {
+    const text = `
+      What You Will Do
+      • Design and develop production systems for model deployment
+      Qualifications
+      Pursuing a bachelor's or master’s degree in computer science, engineering, or another related field. Must graduate before Summer 2028.
+      Thoughtful problem-solving: For you, problem-solving starts with a clear and accurate understanding of the context. You can decompose tricky problems and work towards a clean solution, by yourself or with teammates. You're comfortable asking for help when you get stuck.
+      Put users first: You think critically about the implications of what you're building, and how it shapes real people's lives.
+      Team player: For you, work isn't a solo endeavor. You enjoy collaborating cross-functionally to accomplish shared goals.
+      AI enthusiast: You have built or prototyped features with AI technologies (LLMs, Embeddings, ML) and are interested in learning more.
+    `
+    const requirements = extractRequirements(text)
+    expect(requirements).toMatch(/bachelor/i)
+    expect(requirements).toMatch(/graduate before Summer 2028/i)
+    expect(requirements).not.toMatch(/thoughtful problem-solving/i)
+    expect(requirements).not.toMatch(/team player/i)
+    expect(requirements).not.toMatch(/ai enthusiast/i)
+
+    const summary = summarizePosting(text)
+    expect(summary).toMatch(/design and develop production systems/i)
+    expect(summary).not.toMatch(/thoughtful problem-solving/i)
+    expect(summary).not.toMatch(/must graduate/i)
+  })
+
+  it('reads JSON-LD baseSalary from html', () => {
+    const html = `
+      <script type="application/ld+json">
+        {"@type":"JobPosting","description":"Build APIs with Python.","baseSalary":{"@type":"MonetaryAmount","currency":"USD","value":{"@type":"QuantitativeValue","minValue":40,"maxValue":45,"unitText":"HOUR"}}}
+      </script>
+    `
+    const pay = extractPay('Build APIs with Python.', { html })
+    expect(pay.payMin).toBe(40)
+    expect(pay.payMax).toBe(45)
+    expect(pay.payUnit).toBe('hour')
+  })
+
+  it('postingFields returns pay, requirements, summary, and keywords together', () => {
+    const text = `
+      Compensation
+      $50/hr
+      What You Will Do
+      You will write Python services for trading systems.
+      Qualifications
+      Must graduate before Summer 2028. Experience with Python.
+    `
+    const fields = postingFields(text)
+    expect(fields.payMin).toBe(50)
+    expect(fields.payUnit).toBe('hour')
+    expect(fields.requirements).toMatch(/graduate before Summer 2028/i)
+    expect(fields.summary).toMatch(/python/i)
+    expect(fields.keywords).toMatch(/Python/)
+  })
+
+  it('extracts application end dates from posting copy', () => {
+    expect(extractDeadline('End Date: October 23, 2026 (30+ days left to apply)')).toBe('2026-10-23')
+    expect(extractDeadline('Application deadline: Nov 1, 2026')).toBe('2026-11-01')
+    expect(extractDeadline('Apply by 12/15/2026')).toBe('2026-12-15')
+    expect(extractDeadline('Start Date: August 7, 2026')).toBe('')
+    expect(parseDeadlineDate('2026-10-23')).toBe('2026-10-23')
+    expect(postingFields('End Date: October 23, 2026\nYou will analyze flight data with Python.').deadline).toBe('2026-10-23')
+  })
+
+  it('extracts cohort terms like Summer 2027 from titles and posting copy', () => {
+    expect(extractInternshipTerm('Software Engineer Intern (Winter 2027)')).toEqual({
+      term: 'Winter 2027',
+      season: 'offseason',
+    })
+    expect(extractInternshipTerm('Software Engineer Intern (Fall 2026) - Austin, TX')).toEqual({
+      term: 'Fall 2026',
+      season: 'offseason',
+    })
+    expect(extractInternshipTerm(
+      '2027 Technology Internship (US)',
+      'Our 10-week Summer Internship Program pairs you with a technology team',
+    )).toEqual({
+      term: 'Summer 2027',
+      season: 'summer',
+    })
+    expect(extractInternshipTerm('Software Engineering Intern (Winter)')).toEqual({
+      term: 'Winter 2027',
+      season: 'offseason',
+    })
+    expect(extractInternshipTerm('Backend Software Engineer Intern')).toBeNull()
+  })
+
   it('maps Greenhouse, Lever, Ashby, SmartRecruiters, and Jane Street URLs', () => {
     expect(parseApplyTarget('https://job-boards.greenhouse.io/thenuclearcompany/jobs/5391923008?utm_source=x')).toEqual({
       kind: 'greenhouse',
@@ -403,6 +666,14 @@ describe('posting text', () => {
     expect(parseApplyTarget('https://jobs.smartrecruiters.com/Canva/6000000001291655-phd-research-scientist-intern')).toEqual({
       kind: 'smartrecruiters',
       api: 'https://api.smartrecruiters.com/v1/companies/Canva/postings/6000000001291655',
+    })
+    expect(parseApplyTarget('https://api.smartrecruiters.com/v1/companies/AbbVie/postings/3743990014930726')).toEqual({
+      kind: 'smartrecruiters',
+      api: 'https://api.smartrecruiters.com/v1/companies/AbbVie/postings/3743990014930726',
+    })
+    expect(parseApplyTarget('https://www.verition.com/open-positions?gh_jid=5214784007')).toEqual({
+      kind: 'greenhouse',
+      api: 'https://boards-api.greenhouse.io/v1/boards/veritiongroupllc/jobs/5214784007',
     })
     expect(parseApplyTarget('https://www.janestreet.com/join-jane-street/position/8599644002/')).toEqual({
       kind: 'greenhouse',
@@ -448,8 +719,9 @@ describe('posting text', () => {
     `
     const vertivSummary = summarizePosting(vertiv)
     expect(vertivSummary).toMatch(/market, competitive|product portfolio/i)
-    expect(vertivSummary).toMatch(/excel/i)
+    expect(vertivSummary).not.toMatch(/excel/i)
     expect(vertivSummary).not.toMatch(/core principles/i)
+    expect(extractKeywords(vertiv)).toMatch(/Excel/i)
 
     const amex = `
       Business Unit/Role Specific Information The Enterprise Technology Services organization partners with every part of the American Express business.
@@ -465,11 +737,12 @@ describe('posting text', () => {
     `
     const amexSummary = summarizePosting(amex)
     expect(amexSummary).toMatch(/AI\/ML models|data collection/i)
-    expect(amexSummary).toMatch(/python/i)
+    expect(amexSummary).not.toMatch(/python/i)
     expect(amexSummary).not.toMatch(/10-week/i)
     expect(amexSummary).not.toMatch(/business unit/i)
     expect(amexSummary).not.toMatch(/learn how products/i)
     expect(amexSummary).not.toMatch(/javascript/i)
+    expect(extractKeywords(amex)).toMatch(/Python/)
   })
 })
 
@@ -481,6 +754,17 @@ describe('closed apply pages', () => {
     expect(ashbyUnavailable('https://jobs.ashbyhq.com/notion/3fba1c39-c5cb-47d7-9ad2-1cec4d7e9d0c', live)).toBe(false)
     expect(ashbyJobListed('7e0dafe8-3eec-442e-aa76-a4d84d779fb1', [{ id: 'other' }])).toBe(false)
     expect(ashbyJobListed('7e0dafe8-3eec-442e-aa76-a4d84d779fb1', [{ id: '7e0dafe8-3eec-442e-aa76-a4d84d779fb1' }])).toBe(true)
+  })
+
+  it('flags ADP recruitment links missing cid (SPA error shell)', () => {
+    const broken = adpRecruitmentRef(
+      'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?jobId=565843',
+    )
+    const complete = adpRecruitmentRef(
+      'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=abc&ccId=19000101_000001&jobId=565843',
+    )
+    expect(broken).toEqual({ jobId: '565843', cid: '', ccId: '' })
+    expect(complete).toEqual({ jobId: '565843', cid: 'abc', ccId: '19000101_000001' })
   })
 
   it('keeps a specific posting URL and drops a career-board homepage', () => {
@@ -498,6 +782,22 @@ describe('closed apply pages', () => {
     expect(isSpecificPostingUrl('https://www.metacareers.com/jobs/1027438186737957')).toBe(true)
     expect(isSpecificPostingUrl('https://www.metacareers.com/careerprograms/students')).toBe(false)
     expect(internshipBoardForCompany('Replit', 'https://jobs.ashbyhq.com/replit/7e0dafe8-3eec-442e-aa76-a4d84d779fb1')).toBe('https://jobs.ashbyhq.com/replit')
+    expect(internshipBoardForCompany('Johnson & Johnson', '')).toBe('https://jj.wd5.myworkdayjobs.com/en-US/JJ?q=intern')
+    expect(internshipBoardForCompany('Ford', '')).toBe('https://www.careers.ford.com/search-jobs/intern')
+    expect(internshipBoardForCompany('General Motors', '')).toBe('https://generalmotors.wd5.myworkdayjobs.com/Careers_GM?q=intern')
+    expect(internshipBoardForCompany('UN Volunteers', '')).toBe('https://app.unv.org/explore/assignments')
+    expect(internshipBoardForCompany('PwC', '')).toBe('https://jobs-us.pwc.com/us/en/search-results?keywords=intern')
+    expect(internshipBoardForCompany('Shell', '')).toBe('https://shell.wd3.myworkdayjobs.com/ShellCareers?q=intern')
+    expect(internshipBoardForCompany('ExxonMobil', '')).toBe('https://jobs.exxonmobil.com/search/?q=intern')
+    expect(internshipBoardForCompany('Two Sigma', '')).toBe('https://careers.twosigma.com/')
+    expect(isSpecificPostingUrl('https://www.careers.ford.com/job/dearborn/software-engineering-intern/48560/97059791888')).toBe(true)
+    expect(isSpecificPostingUrl('https://www.careers.ford.com/search-jobs/intern')).toBe(false)
+    expect(isSpecificPostingUrl('https://careers.rivian.com/careers-home/jobs/33385')).toBe(true)
+    expect(isSpecificPostingUrl('https://careers.un.org/jobSearchDescription/282585')).toBe(true)
+    expect(isSpecificPostingUrl('https://careers.un.org/jobsearch')).toBe(false)
+    const boards = companyInternshipBoards([])
+    expect(boards.find((row) => row.company === 'Ford')?.boardUrl).toBe('https://www.careers.ford.com/search-jobs/intern')
+    expect(boards.find((row) => row.company === 'Johnson & Johnson')?.count).toBe(0)
   })
 })
 
@@ -525,10 +825,82 @@ describe('search over posting specifics', () => {
       listing({ id: 'py', role: 'Backend Intern', keywords: 'Python, SQL' }),
       listing({ id: 'ms', company: 'Microsoft', role: 'Product Intern' }),
       listing({ id: 'eng', role: 'Software Engineering Intern' }),
+      listing({ id: 'amz', company: 'Amazon', role: 'SDE Intern' }),
     ]
     expect(filterListings(rows, { query: 'pyhton' }).map((item) => item.id)).toEqual(['py'])
     expect(filterListings(rows, { query: 'microsft' }).map((item) => item.id)).toEqual(['ms'])
     expect(filterListings(rows, { query: 'engineer' }).map((item) => item.id)).toEqual(['eng'])
+    expect(filterListings(rows, { query: 'ama' }).map((item) => item.id)).toEqual(['amz'])
+    expect(filterListings(rows, { query: 'amazo' }).map((item) => item.id)).toEqual(['amz'])
+  })
+
+  it('locks onto a known company name instead of fuzzy near-misses', () => {
+    const rows = [
+      listing({ id: 'notion', company: 'Notion', role: 'Software Engineer Intern' }),
+      listing({ id: 'motion', company: 'DiDi Global', role: 'Motion Planning Engineer Intern' }),
+      listing({ id: 'uber', company: 'Uber', role: 'Software Engineer Intern' }),
+      listing({ id: 'user', company: 'Snap', role: 'User Experience Intern' }),
+      listing({ id: 'slack', company: 'Slack', role: 'Software Engineer Intern' }),
+      listing({ id: 'stack', company: 'Nash', role: 'Full Stack Engineering Intern' }),
+      listing({ id: 'spacex', company: 'SpaceX', role: 'Avionics Intern' }),
+      listing({ id: 'space', company: 'Stoke Space', role: 'Software Engineer Intern' }),
+      listing({ id: 'meta', company: 'Meta', role: 'Software Engineer Intern' }),
+      listing({ id: 'mesa', company: 'Boeing', role: 'Data Analytics Intern', location: 'Mesa, AZ' }),
+    ]
+    expect(filterListings(rows, { query: 'notion' }).map((item) => item.id)).toEqual(['notion'])
+    expect(filterListings(rows, { query: 'uber' }).map((item) => item.id)).toEqual(['uber'])
+    expect(filterListings(rows, { query: 'slack' }).map((item) => item.id)).toEqual(['slack'])
+    expect(filterListings(rows, { query: 'spacex' }).map((item) => item.id)).toEqual(['spacex'])
+    expect(filterListings(rows, { query: 'meta' }).map((item) => item.id)).toEqual(['meta'])
+  })
+
+  it('stays explorible for prefixes and skills without a company lock', () => {
+    const rows = [
+      listing({ id: 'amz', company: 'Amazon', role: 'SDE Intern' }),
+      listing({ id: 'ms', company: 'Microsoft', role: 'Product Intern' }),
+      listing({ id: 'py', role: 'Backend Intern', keywords: 'Python, SQL' }),
+      listing({ id: 'js', role: 'Software Engineer Intern', keywords: 'JavaScript' }),
+    ]
+    expect(filterListings(rows, { query: 'ama' }).map((item) => item.id)).toEqual(['amz'])
+    expect(filterListings(rows, { query: 'amazo' }).map((item) => item.id)).toEqual(['amz'])
+    expect(filterListings(rows, { query: 'micro' }).map((item) => item.id)).toEqual(['ms'])
+    expect(filterListings(rows, { query: 'python' }).map((item) => item.id)).toEqual(['py'])
+    expect(filterListings(rows, { query: 'java' }).map((item) => item.id)).toEqual([])
+  })
+
+  it('returns no junk rows for a known brand with no listings', () => {
+    const rows = [
+      listing({ id: 'metals', company: 'Micron', role: 'Process Engineer, Metals' }),
+      listing({ id: 'stack', company: 'Nash', role: 'Full Stack Engineering Intern' }),
+    ]
+    expect(filterListings(rows, { query: 'meta' }).map((item) => item.id)).toEqual([])
+    expect(filterListings(rows, { query: 'slack' }).map((item) => item.id)).toEqual([])
+  })
+
+  it('matches Ph.D. titles when searching phd', () => {
+    const rows = [
+      listing({ id: 'dot', role: 'Ph.D. Research Intern' }),
+      listing({ id: 'plain', role: 'Research Intern' }),
+    ]
+    expect(filterListings(rows, { query: 'phd' }).map((item) => item.id)).toEqual(['dot'])
+  })
+
+  it('does not treat near-miss words as the company name', () => {
+    expect(queryMatches('Motion Planning', 'notion')).toBe(false)
+    expect(queryMatches('options trading', 'notion')).toBe(false)
+    expect(queryMatches('user experience', 'uber')).toBe(false)
+    expect(queryMatches('full stack', 'slack')).toBe(false)
+    expect(queryMatches('space systems', 'spacex')).toBe(false)
+  })
+
+  it('matches short company and city prefixes in search', () => {
+    expect(queryMatches('Amazon', 'ama')).toBe(true)
+    expect(queryMatches('Amazon.com Services LLC', 'ama')).toBe(true)
+    expect(queryMatches('Seattle, WA', 'seatt')).toBe(true)
+    expect(queryMatches('Boeing', 'boe')).toBe(true)
+    // "meta" must not prefix into unrelated stems in body copy.
+    expect(queryMatches('metallurgy requirements', 'meta')).toBe(false)
+    expect(queryMatches('Mesa, AZ', 'meta')).toBe(false)
   })
 })
 
@@ -538,5 +910,15 @@ describe('sheet deadline', () => {
     const unknown = listing()
     expect(isoDeadline('') || isoDeadline(known.deadline)).toBe('2026-10-03')
     expect(isoDeadline('') || isoDeadline(unknown.deadline)).toBe('')
+  })
+})
+
+describe('saved location pick', () => {
+  it('parses cities so the folder sheet can offer a city picker', () => {
+    const places = parsePlaces('31 locations Everett, WA Saint Charles, MO Huntsville, AL Charleston, SC')
+    expect(places.compact).toBe(true)
+    expect(places.label).toBe('31 locations')
+    expect(places.places).toContain('Everett, WA')
+    expect(places.places).toContain('Huntsville, AL')
   })
 })

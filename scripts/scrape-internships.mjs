@@ -10,15 +10,17 @@
  *   - Y Combinator internships page (ycombinator.com/internships)
  *     plus intern rows on the public Work at a Startup jobs board
  *   - Idealist U.S. nonprofit internships (public search + listing pages)
- *   - Official company boards (Greenhouse, Ashby, Lever, Workday) plus
- *     Meta, Google, and Amazon career search for large employers the
- *     GitHub lists often miss
+ *   - Official company boards (Greenhouse, Ashby, Lever, Workday,
+ *     SmartRecruiters, Phenom, Ford, Rivian) plus Meta, Google, and
+ *     Amazon career search for large employers the GitHub lists often miss
+ *   - ReliefWeb UN internships and UN Volunteer assignments
  *
  * Usage (repo root):
  *   npm run scrape
  *   node scripts/scrape-internships.mjs --reclassify-only
  *   node scripts/scrape-internships.mjs --enrich-titles-only
  *   node scripts/scrape-internships.mjs --enrich-summaries
+ *   node scripts/scrape-internships.mjs --summaries-only
  *   node scripts/scrape-internships.mjs --enrich-summaries --force
  *   node scripts/scrape-internships.mjs --check-links
  *   node scripts/scrape-internships.mjs --company-only
@@ -26,7 +28,9 @@
  * USAJobs needs USAJOBS_API_KEY + USAJOBS_EMAIL (https://developer.usajobs.gov/).
  * If those are missing, GitHub + biotech snapshots still refresh.
  *
- * Stores company, role, location, apply URL, posted date,
+ * Stores company, role, location, apply URL, posted date, application
+ * deadline when the board publishes one (Workday endDate, USAJobs close
+ * date, Idealist deadline, or “End Date: …” in the posting),
  * a short posting summary, searchable skill mentions (Python, Java, Chinese…),
  * and closed / citizenship / work-authorization flags when the source has them.
  * Does not clone Handshake or invent postings.
@@ -37,12 +41,41 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isSpecificPostingUrl } from './apply-url.mjs'
+import { careerBoardsOfKind } from './career-boards.mjs'
 import { pruneDeadInternshipListings } from './check-internship-links.mjs'
-import { enrichListingSummaries, postingFields } from './job-summary.mjs'
+import { enrichListingSummaries, extractInternshipTerm, postingFields } from './job-summary.mjs'
 import { loadEnv } from './load-env.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = join(ROOT, 'app/data/listings.json')
+const SUMMARIES_OUT = join(ROOT, 'app/data/listing-summaries.json')
+
+function readListingsSnapshot() {
+  const raw = JSON.parse(readFileSync(OUT, 'utf8'))
+  const summaries = existsSync(SUMMARIES_OUT)
+    ? JSON.parse(readFileSync(SUMMARIES_OUT, 'utf8'))
+    : {}
+  for (const item of raw.listings || []) {
+    if (summaries[item.id] && !item.summary) {
+      item.summary = summaries[item.id]
+    }
+  }
+  return raw
+}
+
+function writeListingsSnapshot(payload) {
+  const summaries = {}
+  const listings = (payload.listings || []).map((item) => {
+    if (!item?.summary) {
+      return item
+    }
+    summaries[item.id] = item.summary
+    const { summary, ...rest } = item
+    return rest
+  })
+  writeFileSync(OUT, `${JSON.stringify({ ...payload, listings }, null, 2)}\n`)
+  writeFileSync(SUMMARIES_OUT, `${JSON.stringify(summaries, null, 2)}\n`)
+}
 const UA = 'InternshipsScraper/1.0'
 const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
 
@@ -60,45 +93,47 @@ const SOURCE = {
   yc: 'https://www.ycombinator.com/internships',
   ycJobs: 'https://www.workatastartup.com/jobs',
   idealist: 'https://www.idealist.org/en/internships',
+  un: 'https://careers.un.org/jobsearch',
+  unv: 'https://app.unv.org/explore/assignments',
 }
 
 const TRACKS = [
   { id: 'clinical', test: /clinical research|clinical intern|clinical affairs|clinical ops|clinical operations|patient care|\bscribe\b|hospital intern|nursing intern|allied health|health research|medical intern(?!al)|medical education|\bpsychology\b|psycholog(?:y|ical) intern|mental health intern|behavioral health intern|counseling intern/i },
   { id: 'pharma', test: /pharmacolog|pharmaceutical|drug discovery|medicinal chem|formulation|biologics|\bvaccine\b|clinical pharmacology|process development|\bcmc\b|immunolog|proteomic|\bmrna\b|pharma technical/i },
   { id: 'public-health', test: /public health|epidemiolog|health policy|community health|population health|global health/i },
-  { id: 'science', test: /chemist(?!ry engineer)|material scientist|\bbiology\b|\bbiologist\b|molecular biolog|biochem|microbiolog|neuroscie|wet[- ]?lab|life sciences?|application scientist|(?:chem(?:istry)?|biology|physics|life science) lab|materials science|analytical chem|(?:chemistry|biology|physics|life science) intern|environmental affairs|r&d process|research & development|research and development/i },
-  { id: 'finance', test: /finance intern|\bfinance\b|financial|accounting|\baccounts\b|investment|invest(?:ment)?s?\b|audit intern|\baudit\b|tax intern|actuarial|wealth management|corporate risk|risk summer|risk intern|far program|alternatives inv|scholars business|\bfp&a\b|venture capital|fixed income|\bteller\b/i },
-  { id: 'consulting', test: /consulting|\bconsultant\b|strategy intern|strategy consulting|deployment strategist|strategy & transformation|strategic planning/i },
-  { id: 'sales', test: /sales intern|technical sales|client solutions|account (?:manager|executive|development)|business development|corporate part|gtm\b|go[- ]to[- ]market|customer success|sales prospect|\bbdr\b|sales academy|sales analyst|market development|\bsales\b/i },
-  { id: 'marketing', test: /marketing|communications intern|internship - communications|communications and community|brand intern|\bbrand\b|growth intern|employer brand|market research|\bgrowth\b|policy comms/i },
+  { id: 'science', test: /chemist(?!ry engineer)|material scientist|\bbiology\b|\bbiologist\b|molecular biolog|biochem|microbiolog|neuroscie|wet[- ]?lab|life sciences?|application scientist|(?:chem(?:istry)?|biology|physics|life science) lab|materials science|analytical chem|(?:chemistry|biology|physics|life science) intern|environmental affairs|environmental sciences?|\bgeology\b|r&d process|research & development|research and development|battery.{0,40}model/i },
+  { id: 'finance', test: /finance intern|\bfinance\b|financial|accounting|\baccounts\b|investment|invest(?:ment)?s?\b|audit intern|\baudit\b|\btax\b|actuarial|wealth management|corporate risk|risk summer|risk intern|far program|alternatives inv|scholars business|\bfp&a\b|venture capital|fixed income|\bteller\b|underwriting|pricing analyst|digital assurance|assurance & transparency|\bdat\b|capital markets|trade support|\bclaims\b|\btreasury\b|middle office|equity middle/i },
+  { id: 'consulting', test: /consulting|\bconsultant\b|strategy intern|strategy consulting|deployment strategist|strategy & transformation|strategic planning|strategy and business/i },
+  { id: 'sales', test: /sales intern|technical sales|client solutions|account (?:manager|executive|development)|business development|corporate part|gtm\b|go[- ]to[- ]market|customer success|sales prospect|\bbdr\b|sales academy|sales analyst|market development|\bsales\b|commercial leader/i },
+  { id: 'marketing', test: /marketing|communications intern|internship - communications|communications and community|communications and public|brand intern|\bbrand\b|growth intern|employer brand|market research|\bgrowth\b|policy comms/i },
   { id: 'retail', test: /retail store|store (?:executive|leadership|management)|store intern/i },
-  { id: 'hr', test: /human resources?|\bhr intern|people intern|people operations|recruiting intern/i },
+  { id: 'hr', test: /human resources?|\bhr intern|\bhr service|people intern|people operations|recruiting intern|talent acquisition/i },
   { id: 'entertainment', test: /live entertainment|attractions|costume development|art studio intern|publicity intern|office of the president intern|stylized photography|television intern/i },
-  { id: 'ops', test: /operations intern|intern[- –]+operations|supply chain|human resources|\bhr intern|recruiting|procurement|purchasing intern|business operations|logistics|service transformation|customer (?:ops|operations|experience)|corporate summer|corporate internship|operational excellence|tech ops|academy admin|production intern|operations program|global workplace|\bcustomer\b|field service|lifecycle services|operation(?:s)? manager|distribution center|inventory analyst|control room|client services|product support|integrated product support|advanced operations|operations planning|\behs\b|environment, health|health, and safety|government operations|\bcoo intern|investor relations|startup operations/i },
+  { id: 'ops', test: /operations intern|intern[- –]+operations|operations (?:associate|co-op)|supply chain|human resources|\bhr intern|recruiting|procurement|purchasing intern|business operations|logistics|service transformation|customer (?:ops|operations|experience)|corporate summer|corporate internship|operational excellence|tech ops|academy admin|production intern|operations program|global workplace|\bcustomer\b|field service|lifecycle services|operation(?:s)? manager|distribution center|inventory analyst|control room|client services|product support|integrated product support|advanced operations|operations planning|\behs\b|environment, health|health, and safety|environmental health|government operations|\bcoo intern|investor relations|startup operations|area manager|area maintenance|operations (?:analyst|management|development|supervisor)|enterprise operations|production planning|sourcing analyst|organizational change|\bwcm\b|loss prevention|facilities services|fleet specialist|leadership rotation|leadership development|mba leadership|business co-op|business intern(?!ship program)|business & commercial|founder intern|generalist intern|office coordinator|injury prevention|workplace health|commercial intern|maintenance group|production group leader/i },
   { id: 'legal', test: /legal intern|legal research|legal fellowship|legal summer|law student|law clerk|general legal|\blegal\b/i },
   { id: 'education', test: /teaching intern|dean intern|explorer program|medical education|education intern|student trainee \(training/i },
   { id: 'policy', test: /policy intern|advocacy|public policy|government relations|foreign service|legislative intern|regulatory affairs|political science intern|\bcapitol hill\b|policy comms|regulatory submission|policy fellowship|climate justice|policy & governance/i },
   { id: 'gov', test: /government intern|government funded|legislative|congressional|public affairs intern|pathways intern|student trainee|police department/i },
   { id: 'nonprofit', test: /nonprofit|non-profit|\bngo\b|community outreach|community engagement|community organizing|life\.church|campus internship|development internship|field intern|campaign intern|member services|organizing intern|sanctuary intern|biodynamic|farming intern|respite provider/i },
-  { id: 'architecture', test: /naval architect|urban (?:design|planning)|drafting student|facilities engineering|global real estate|property management|architect co-op|architect intern/i },
+  { id: 'architecture', test: /naval architect|urban (?:design|planning)|drafting student|facilities engineering|global real estate|property management|architect co-op|architect intern|architectural engineer|landscape architecture|revit drafting|\breal estate\b/i },
   { id: 'design', test: /\bux\b|\bui\b|graphic design|product design|industrial design|visual design|game design|level design|instructional design|show set|animator|animation|rigging|special effects|localization specialist|creative design|design integration|technical design|apparel development/i },
   { id: 'media', test: /journalis|news intern|social media|video intern|content intern|broadcast|creative video|print production|wdi\b|video &|multimedia intern/i },
   { id: 'writing', test: /\bwriter\b|editor intern|editorial intern|copywriter|technical writer/i },
-  { id: 'ml', test: /machine learning|artificial intelligence|\bai\/ml\b|\bllm\b|\bgenai\b|\bai\b|\bml\b|deep learning|applied ml|research scientist|reinforcement learn|generative|3d vision|user modeling|autonomous driving|autonomous vehicles|interactive driving|human interactive|virtual network|large language models|graphics and simulation|agent development|applied science/i },
+  { id: 'ml', test: /machine learning|artificial intelligence|\bai\/ml\b|\bllm\b|\bgenai\b|\bai\b|\bml\b|deep learning|applied ml|research scientist|reinforcement learn|generative|3d vision|user modeling|autonomous driving|autonomous vehicles|interactive driving|human interactive|virtual network|large language models|graphics and simulation|agent development|applied science|motion planning|simulation intern/i },
   { id: 'quant', test: /quant|trading|trader|market(s)? intern|fundamental research|research analyst/i },
-  { id: 'pm', test: /product manager|product management|\bpm\b|product intern(?!ship program)|product analyst|product development internship|technical project manager|product strategy|program management|project management|business management/i },
+  { id: 'pm', test: /product manager|product management|\bpm\b|product intern(?!ship program)|product analyst|product development internship|technical project manager|product strategy|program management|project management|business management|project coordinator/i },
   { id: 'data', test: /data scientist|data engineer|data analyst|data science|data scie|\bdata intern\b|analytics|data platform|business intelligence|business analyst|engineering and data|platform intelligence|fall data|statistical programming|data support|yield enhancement, data/i },
   { id: 'security', test: /security|cyber|\bnsa\b|penetration test/i },
-  { id: 'hardware', test: /hardware|fpga|asic|embedded|firmware|circuits|circuit analysis|\bcircuit\b|analog|rtl\b|silicon|chip|vlsi|semiconductor|design verification|\bdv intern\b|\bdft\b|design for test|\bpd intern\b|physical design|p&r|mixed signal|rfic|hbm|mems|gpu intern|layout design|image sensor|wafer|characterization|verification intern|validation intern|\bvalidation\b|\bverification\b|system architecture|computer architecture|design architecture|digital physical|digital intern|digital circ|device build|inference intern|\bdram\b|\beuv\b|lithograph|nanofabricat|\bsige\b|photomask|yield enhancement|yield technology|mask technology|optical test|radio systems|spectrum dominance|intelligent sensing|module engineering|fab equipment|metrology|digital ip|device modell|technology development intern/i },
-  { id: 'mechanical', test: /mechanical|mechatronic|turbomachin|gas turbine|manufacturing engineer|manufacturing controls|industrial engineer|injection molding|plastics engineer|thermal systems|cnc\b|prototyping shop|maintenance,\s*repair|mro\b|actuation|design release engineer|apparel materials/i },
-  { id: 'electrical', test: /electrical|electronics|\bee intern|\bece intern|power systems|controls engineer|\brf\b|photonic|optical engineer|electro-optical|telematics/i },
-  { id: 'civil', test: /civil|structural|geotech|water resources|\bbridge\b|transportation intern|roadway|transportation engineering|wastewater/i },
-  { id: 'chemical', test: /chemical engineer|materials engineer|materials intern|process engineer|nanoengineer|nano engineer|metallurg/i },
-  { id: 'biomedical', test: /biomed|bio[- ]?med|bioengineer|medtech|medical device|hip\/?knee/i },
-  { id: 'aerospace', test: /aerospace|aeronautic|avionics|cabin engineering|flight hardware|flight test|\bgnc\b/i },
-  { id: 'robotics', test: /robotic|automation internship|automation intern/i },
-  { id: 'swe', test: /software|swe\b|sde\b|\bsdet\b|frontend|front-end|backend|back-end|full[-\s]?stack|programmer|developer|platform engineer|infrastructure|devops|sre\b|technology intern|application development|member of technical staff|forward deployed|tools and compilers|supercomputing|compilers|inference optimization|\bit\b|quality assurance|\bqa\b|risk technology|technology product|\bcis\/cs\b|\bcs internship\b|desktop systems|system(?:s)? administrator|performance tools|pipeline and test|systems performance|ip design/i },
-  { id: 'engineering', test: /engineer(ing)? intern|intern[\s-]+engineering|engineer(ing)?(?:\s+\w+){0,3}\s+co-?op|nuclear|environmental en|welding|reliability|systems engineer|test engineer|application engineer|quality intern|\bquality\b|manufacturing\/?quality|product engineering|equipment engineer|engineering technician|lab technician|lab intern|field service technician|packaging|innovations team|design build|mfg test|processing intern|methods process|technical direction|design engineering|air mi engineering|ph\.?d\.? engineering/i },
+  { id: 'hardware', test: /hardware|fpga|asic|embedded|firmware|circuits|circuit analysis|\bcircuit\b|analog|rtl\b|silicon|chip|vlsi|semiconductor|design verification|\bdv intern\b|\bdft\b|design for test|\bpd intern\b|physical design|p&r|mixed signal|rfic|hbm|mems|gpu intern|layout design|image sensor|wafer|characterization|verification intern|validation intern|\bvalidation\b|\bverification\b|system architecture|computer architecture|design architecture|digital physical|digital intern|digital circ|device build|inference intern|\bdram\b|\beuv\b|lithograph|nanofabricat|\bsige\b|photomask|yield enhancement|yield technology|mask technology|optical test|radio systems|spectrum dominance|intelligent sensing|module engineering|fab equipment|metrology|digital ip|device modell|technology development intern|infrared imaging|robot optics|\bdsp\b|digital signal|si\/pi intern/i },
+  { id: 'mechanical', test: /mechanical|mechatronic|turbomachin|gas turbine|manufacturing engineer|manufacturing controls|industrial engineer|injection molding|plastics engineer|thermal systems|cnc\b|prototyping shop|maintenance,\s*repair|mro\b|actuation|design release engineer|apparel materials|tool and die|weld engineer|controls technician|intern,\s*controls|mech\s*\/\s*thermal|chassis control|vehicle motion|vehicle integration|calibration|mechanisms & payload/i },
+  { id: 'electrical', test: /electrical|electronics|\bee intern|\bece intern|power systems|controls engineer|\brf\b|photonic|optical engineer|electro-optical|telematics|\bradar\b/i },
+  { id: 'civil', test: /civil|structural|geotech|water resources|\bbridge\b|transportation intern|roadway|transportation engineering|wastewater|construction|survey intern|\bsurvey\b|environmental intern|environmental\/safety|commissioning student/i },
+  { id: 'chemical', test: /chemical engineer|materials engineer|materials intern|process engineer|nanoengineer|nano engineer|metallurg|materials co-op/i },
+  { id: 'biomedical', test: /biomed|bio[- ]?med|bioengineer|medtech|medical device|hip\/?knee|orthopedic|wound closure|genomics/i },
+  { id: 'aerospace', test: /aerospace|aeronautic|avionics|cabin engineering|flight hardware|flight test|\bgnc\b|mission planning|\badas\b/i },
+  { id: 'robotics', test: /robotic|automation internship|automation intern|smart factory|intern,\s*simulation/i },
+  { id: 'swe', test: /software|swe\b|sde\b|\bsdet\b|frontend|front-end|backend|back-end|full[-\s]?stack|programmer|developer|platform engineer|infrastructure|devops|sre\b|technology intern|application development|member of technical staff|forward deployed|tools and compilers|supercomputing|compilers|inference optimization|\bit\b|quality assurance|\bqa\b|risk technology|technology product|\bcis\/cs\b|\bcs internship\b|desktop systems|system(?:s)? administrator|performance tools|pipeline and test|systems performance|ip design|business technology|digital [&and]+ technology|cloud engineering|technology solutions|medical digital|manufacturing execution|\bmes\b|system test intern|intern[- –]+system test|computing (?:graduate|student)/i },
+  { id: 'engineering', test: /engineer(ing)? intern|intern[\s-]+engineers?|internship\s*\(engineering\)|product engineer|project engineer|system engineering|engineer(ing)?(?:\s+\w+){0,3}\s+co-?op|nuclear|environmental en|welding|reliability|systems engineer|test engineer|application engineer|quality intern|\bquality\b|manufacturing\/?quality|product engineering|equipment engineer|engineering technician|lab technician|lab intern|field service technician|packaging|innovations team|design build|mfg test|processing intern|methods process|technical direction|design engineering|air mi engineering|ph\.?d\.? engineering|engineering & technical|equipment service|industrial solutions|r&d (?:lab|spring|summer|fall|co-?op)|early stage innovation|\br&d\b|technical (?:functions?|engineering)|engineering function/i },
 ]
 
 const STEM_INCLUDE = /mechanical|electrical|\bee\b|\bece\b|civil|structural|chemical|biomed|bio[- ]?med|bioengineer|aerospace|aeronautic|industrial engineer|manufacturing engineer|materials engineer|environmental engineer|nuclear|robotic|hardware|analog|fpga|asic|embedded|firmware|\brf\b|geotech|water resources|turbomachin|welding|power systems|controls engineer|plastics|injection molding|product engineering|gas turbine|cabin engineering|engineering intern|engineer intern|engineering co-?op|co-?op.{0,24}engineer|process engineer|equipment engineer|reliability|systems engineer|test engineer|flight|avionics|mechatronic|optical engineer|photonic|nanoengineer|nano engineer|marine engineer|ocean engineer|metallurg|medtech|medical device/i
@@ -183,12 +218,17 @@ function inferTrack(role) {
   return 'other'
 }
 
-function inferSeason(role, terms = []) {
+function inferSeason(role, terms = [], sourceSeason = 'summer') {
   const hay = [role, ...terms].join(' ')
-  if (/fall|autumn|winter|spring|off[-\s]?season|off[-\s]?cycle|co-?op/i.test(hay) && !/summer/i.test(hay)) {
+  const hasSummer = /\bsummer\b/i.test(hay)
+  const hasOff = /\b(fall|autumn|winter|spring|off[-\s]?season|off[-\s]?cycle|co-?op)\b/i.test(hay)
+  if (hasSummer && !hasOff) {
+    return 'summer'
+  }
+  if (hasOff && !hasSummer) {
     return 'offseason'
   }
-  return 'summer'
+  return sourceSeason === 'offseason' ? 'offseason' : 'summer'
 }
 
 function slugPart(value) {
@@ -429,7 +469,7 @@ function parseVanshTable(markdown, season) {
       location: parseLocation(locationCell),
       url,
       posted: stripTags(postedCell),
-      season,
+      season: inferSeason(role, [], season),
       track: inferTrack(role),
       closed,
       noSponsorship: /🛂/.test(roleRaw),
@@ -655,6 +695,21 @@ function mergeListings(...groups) {
     if (!existing.keywords && item.keywords) {
       seen.set(key, { ...seen.get(key), keywords: item.keywords })
     }
+    if (!existing.payText && item.payText) {
+      seen.set(key, {
+        ...seen.get(key),
+        payText: item.payText,
+        payMin: item.payMin,
+        payMax: item.payMax,
+        payUnit: item.payUnit,
+      })
+    }
+    if (!existing.requirements && item.requirements) {
+      seen.set(key, { ...seen.get(key), requirements: item.requirements })
+    }
+    if ((existing.detailsVersion ?? 0) < (item.detailsVersion ?? 0)) {
+      seen.set(key, { ...seen.get(key), detailsVersion: item.detailsVersion })
+    }
     if (!existing.postedAt && item.postedAt) {
       seen.set(key, {
         ...seen.get(key),
@@ -764,10 +819,28 @@ const COMPANY_ATS_BOARDS = [
   { company: 'Sierra', kind: 'ashby', board: 'sierra' },
   { company: 'Palantir', kind: 'lever', board: 'palantir' },
   { company: 'Spotify', kind: 'lever', board: 'spotify' },
+  ...careerBoardsOfKind('greenhouse'),
+  ...careerBoardsOfKind('ashby'),
+  ...careerBoardsOfKind('lever'),
+  ...careerBoardsOfKind('smartrecruiters'),
 ]
 
+function dedupeWorkdayBoards(boards) {
+  const seen = new Set()
+  const out = []
+  for (const board of boards) {
+    const key = `${String(board.tenant || '').toLowerCase()}|${String(board.site || '').toLowerCase()}`
+    if (!board.tenant || !board.site || seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    out.push(board)
+  }
+  return out
+}
+
 /** Official Workday career boards for large employers missing from GitHub lists. */
-const COMPANY_WORKDAY_BOARDS = [
+const COMPANY_WORKDAY_BOARDS = dedupeWorkdayBoards([
   { company: 'Nike', host: 'https://nike.wd1.myworkdayjobs.com', tenant: 'nike', site: 'nke' },
   { company: 'Target', host: 'https://target.wd5.myworkdayjobs.com', tenant: 'target', site: 'TargetCareers' },
   { company: 'BlackRock', host: 'https://blackrock.wd1.myworkdayjobs.com', tenant: 'blackrock', site: 'Blackrock_Professional' },
@@ -792,7 +865,8 @@ const COMPANY_WORKDAY_BOARDS = [
   { company: 'KLA', host: 'https://kla.wd1.myworkdayjobs.com', tenant: 'kla', site: 'Search' },
   { company: 'Autodesk', host: 'https://autodesk.wd1.myworkdayjobs.com', tenant: 'autodesk', site: 'Ext' },
   { company: 'The Walt Disney Company', host: 'https://disney.wd5.myworkdayjobs.com', tenant: 'disney', site: 'disneycareer' },
-]
+  ...careerBoardsOfKind('workday'),
+])
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -858,7 +932,7 @@ function biotechFallbackTrack(company, role, track) {
   if (/dexcom|illumina|\bbd\b/i.test(company)) {
     return 'biomedical'
   }
-  if (/amgen|moderna|pfizer|gilead|merck|thermo|sanofi/i.test(company) && /intern|co-?op/i.test(role)) {
+  if (/amgen|moderna|pfizer|gilead|merck|thermo|sanofi|johnson|abbott|lilly|gsk|novartis|abbvie/i.test(company) && /intern|co-?op/i.test(role)) {
     return 'pharma'
   }
   return track
@@ -1907,15 +1981,68 @@ async function fetchLeverBoard(board) {
   return listings
 }
 
+async function fetchSmartRecruitersBoard(board) {
+  const listings = []
+  let offset = 0
+  let total = Infinity
+  let pages = 0
+  while (offset < total && pages < 8) {
+    const url = new URL(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(board.board)}/postings`)
+    url.searchParams.set('q', 'intern')
+    url.searchParams.set('limit', '100')
+    url.searchParams.set('offset', String(offset))
+    const data = await fetchJson(url)
+    const jobs = data.content || data.jobs || []
+    total = Number.isFinite(Number(data.totalFound)) ? Number(data.totalFound) : offset + jobs.length
+    for (const job of jobs) {
+      const loc = job.location || {}
+      const location = atsLocation([loc.city, loc.region, loc.country].filter(Boolean).join(', '))
+      const href = job.ref || job.postingUrl || (job.id
+        ? `https://jobs.smartrecruiters.com/${board.board}/${job.id}`
+        : '')
+      const item = listingFromAts(
+        board,
+        clean(job.name || job.title),
+        location,
+        href,
+        formatIsoPosted(job.releasedDate || job.releasedTimestamp),
+        {
+          postedAt: isoFromDateValue(job.releasedDate || job.releasedTimestamp),
+        },
+      )
+      if (item) {
+        listings.push(item)
+      }
+    }
+    if (!jobs.length) {
+      break
+    }
+    offset += jobs.length
+    pages += 1
+    if (offset < total) {
+      await sleep(150)
+    }
+  }
+  return listings
+}
+
 async function fetchCompanyAtsInternships() {
   const listings = []
+  const seen = new Set()
   for (const board of COMPANY_ATS_BOARDS) {
+    const key = `${board.kind}:${board.board}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
     try {
       const rows = board.kind === 'ashby'
         ? await fetchAshbyBoard(board)
         : board.kind === 'lever'
           ? await fetchLeverBoard(board)
-          : await fetchGreenhouseBoard(board)
+          : board.kind === 'smartrecruiters'
+            ? await fetchSmartRecruitersBoard(board)
+            : await fetchGreenhouseBoard(board)
       listings.push(...rows)
     }
     catch (error) {
@@ -2171,8 +2298,326 @@ async function fetchMetaInternships() {
   return listings
 }
 
+async function fetchFordInternships() {
+  const listings = []
+  const seen = new Set()
+  for (let page = 1; page <= 8; page += 1) {
+    const url = new URL('https://www.careers.ford.com/search-jobs/results')
+    url.searchParams.set('Keywords', 'intern')
+    url.searchParams.set('CurrentPage', String(page))
+    url.searchParams.set('RecordsPerPage', '50')
+    url.searchParams.set('SearchType', '5')
+    const data = await fetchJson(url, { timeoutMs: 20000 })
+    const html = String(data.results || '')
+    const rowRe = /href="(\/job\/[^"]+)"[\s\S]{0,800}?class="job-title"[^>]*>(?:<[^>]+>)*([^<]+)/gi
+    let match = rowRe.exec(html)
+    let found = 0
+    while (match) {
+      found += 1
+      const path = match[1]
+      const role = clean(match[2])
+      const city = (path.match(/^\/job\/([^/]+)\//) || [])[1] || ''
+      const location = city
+        ? `${clean(city.replace(/-/g, ' '))}, United States`
+        : 'United States'
+      const href = `https://www.careers.ford.com${path}`
+      const item = listingFromAts(
+        { company: 'Ford' },
+        role,
+        location || 'See posting',
+        href,
+        '',
+      )
+      if (item && !seen.has(item.url)) {
+        seen.add(item.url)
+        item.id = `company-ford-${slugPart(role)}-${slugPart(path.split('/').pop() || location)}`
+        listings.push(item)
+      }
+      match = rowRe.exec(html)
+    }
+    if (!found || !data.hasJobs) {
+      break
+    }
+    await sleep(200)
+  }
+  return listings
+}
+
+async function fetchRivianInternships() {
+  const data = await fetchJson('https://careers.rivian.com/api/jobs', { timeoutMs: 20000 })
+  const jobs = data.jobs || []
+  const listings = []
+  for (const row of jobs) {
+    const job = row.data || row
+    const role = clean(job.title)
+    const location = atsLocation(
+      [job.city, job.state, job.country].filter(Boolean).join(', ')
+      || job.location
+      || job.locations,
+    )
+    const id = job.slug || job.req_id || job.id
+    const href = id
+      ? `https://careers.rivian.com/careers-home/jobs/${id}`
+      : ''
+    const item = listingFromAts(
+      { company: 'Rivian' },
+      role,
+      location,
+      href,
+      formatIsoPosted(job.posted_date || job.updated_at || job.created_at),
+      {
+        postedAt: isoFromDateValue(job.posted_date || job.updated_at || job.created_at),
+        ...postingFields(job.description || job.description_html || ''),
+      },
+    )
+    if (item) {
+      item.id = `company-rivian-${slugPart(role)}-${slugPart(id)}`
+      listings.push(item)
+    }
+  }
+  return listings
+}
+
+async function fetchExxonInternships() {
+  const listings = []
+  const seen = new Set()
+  for (let start = 0; start <= 75; start += 25) {
+    const html = await fetchHtml(`https://jobs.exxonmobil.com/search/?q=intern&startrow=${start}`)
+    const rowRe = /href="(\/job\/[^"]+)"[^>]*>([^<]+)</gi
+    let match = rowRe.exec(html)
+    let found = 0
+    while (match) {
+      found += 1
+      const path = match[1]
+      const role = clean(match[2])
+      const place = (path.match(/^\/job\/([A-Za-z]+)-/) || [])[1] || ''
+      const state = (path.match(/-([A-Z]{2})-\d+\//) || [])[1] || ''
+      const location = [place.replace(/-/g, ' '), state, 'United States'].filter(Boolean).join(', ')
+      const href = `https://jobs.exxonmobil.com${path}`
+      const item = listingFromAts({ company: 'ExxonMobil' }, role, location, href, '')
+      if (item && !seen.has(item.url)) {
+        seen.add(item.url)
+        item.id = `company-exxonmobil-${slugPart(role)}-${slugPart(path.split('/').filter(Boolean).pop() || location)}`
+        listings.push(item)
+      }
+      match = rowRe.exec(html)
+    }
+    if (!found) {
+      break
+    }
+    await sleep(200)
+  }
+  return listings
+}
+
+async function fetchTwoSigmaInternships() {
+  const listings = []
+  const seen = new Set()
+  const html = await fetchHtml('https://careers.twosigma.com/')
+  const rowRe = /href="(https:\/\/careers\.twosigma\.com\/careers\/JobDetail\/[^"]+)"[^>]*>([^<]*Intern[^<]*)</gi
+  let match = rowRe.exec(html)
+  while (match) {
+    const href = match[1]
+    const role = clean(match[2])
+    const place = (href.match(/JobDetail\/([^/]+)\//) || [])[1] || ''
+    const location = place.replace(/-/g, ' ').replace(/United States.*$/i, 'United States').trim() || 'New York, United States'
+    const item = listingFromAts({ company: 'Two Sigma' }, role, location, href, '')
+    if (item && !seen.has(item.url)) {
+      seen.add(item.url)
+      item.id = `company-two-sigma-${slugPart(role)}-${slugPart(href.split('/').pop() || location)}`
+      listings.push(item)
+    }
+    match = rowRe.exec(html)
+  }
+  return listings
+}
+
+async function fetchPhenomBoard(board) {
+  const listings = []
+  let from = 0
+  let total = Infinity
+  let pages = 0
+  while (from < total && pages < 6) {
+    const response = await fetch(`${board.origin}/widgets`, {
+      method: 'POST',
+      headers: {
+        'user-agent': BROWSER_UA,
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        lang: 'en_us',
+        deviceType: 'desktop',
+        country: 'us',
+        pageName: 'search-results',
+        ddoKey: 'refineSearch',
+        from,
+        jobs: true,
+        counts: true,
+        size: 50,
+        keywords: 'intern',
+        global: true,
+      }),
+      signal: AbortSignal.timeout(20000),
+    })
+    if (!response.ok) {
+      throw new Error(`${board.origin}/widgets → ${response.status}`)
+    }
+    const data = await response.json()
+    const bundle = data.refineSearch || data
+    const jobs = bundle.data?.jobs || bundle.jobs || []
+    total = Number.isFinite(Number(bundle.totalHits)) ? Number(bundle.totalHits) : jobs.length
+    for (const job of jobs) {
+      const role = clean(job.title)
+      const location = atsLocation(job.cityState || job.location || [job.city, job.state, job.country].filter(Boolean).join(', '))
+      const id = job.jobId || job.reqId || job.id
+      const href = job.applyUrl || job.jobUrl || (id
+        ? `${board.origin}/${board.locale || 'us/en'}/job/${id}`
+        : '')
+      const item = listingFromAts(
+        board,
+        role,
+        location,
+        href,
+        formatIsoPosted(job.postedDate || job.postedDateISO),
+        { postedAt: isoFromDateValue(job.postedDate || job.postedDateISO) },
+      )
+      if (item) {
+        listings.push(item)
+      }
+    }
+    if (!jobs.length) {
+      break
+    }
+    from += jobs.length
+    pages += 1
+    await sleep(200)
+  }
+  return listings
+}
+
+function isUnVolunteerRole(role) {
+  return /university volunteer|youth volunteer|online volunteer|\bintern(?:ship|ships)?\b|\bco-?op\b/i.test(role)
+}
+
+function applyUrlFromHtml(html) {
+  const links = [...String(html || '').matchAll(/https?:\/\/[^\s"'<>]+/gi)]
+    .map((row) => row[0].replace(/[.,);]+$/, ''))
+  return links.find((href) => isSpecificPostingUrl(href)) || ''
+}
+
+async function fetchReliefWebJobs({ type, source, idPrefix, keepRole }) {
+  const listings = []
+  let offset = 0
+  let total = Infinity
+  let pages = 0
+  while (offset < total && pages < 6) {
+    const url = new URL('https://api.reliefweb.int/v2/jobs')
+    url.searchParams.set('appname', 'internships-finder-atoz')
+    url.searchParams.set('profile', 'full')
+    url.searchParams.set('limit', '50')
+    url.searchParams.set('offset', String(offset))
+    if (source) {
+      url.searchParams.set('filter[operator]', 'AND')
+      url.searchParams.set('filter[conditions][0][field]', 'type.name')
+      url.searchParams.set('filter[conditions][0][value]', type)
+      url.searchParams.set('filter[conditions][1][field]', 'source.name')
+      url.searchParams.set('filter[conditions][1][value]', source)
+    }
+    else {
+      url.searchParams.set('filter[field]', 'type.name')
+      url.searchParams.set('filter[value]', type)
+    }
+    const data = await fetchJson(url, { timeoutMs: 20000 })
+    const rows = data.data || []
+    total = Number.isFinite(Number(data.totalCount)) ? Number(data.totalCount) : offset + rows.length
+    for (const row of rows) {
+      const fields = row.fields || {}
+      const role = clean(fields.title)
+      if (!role || (keepRole && !keepRole(role))) {
+        continue
+      }
+      const company = clean(fields.source?.[0]?.name || fields.source?.name || 'United Nations')
+      if (idPrefix === 'un' && !/united nations|\bun\b|\bunicef\b|\bundp\b|\bunhcr\b|\bunep\b|\bunesco\b|\bunfpa\b|un women|\bwfp\b|\bwho\b|\bilo\b|\biom\b|world health organization|world food programme|food and agriculture/i.test(company)) {
+        continue
+      }
+      const location = atsLocation(
+        [fields.city?.[0]?.name, fields.country?.[0]?.name].filter(Boolean).join(', ')
+        || fields.country?.[0]?.name
+        || 'See posting',
+      )
+      const href = applyUrlFromHtml(fields.how_to_apply)
+        || (fields.url && isSpecificPostingUrl(fields.url) ? fields.url : '')
+        || (row.id ? `https://reliefweb.int/job/${row.id}` : '')
+      const extra = postingFields([fields.body, fields.how_to_apply].filter(Boolean).join('\n'))
+      const created = fields.date?.created || fields.date?.original
+      if (!isInternshipRole(role) && !isUnVolunteerRole(role)) {
+        continue
+      }
+      if (isGenericInternRole(role) || isDroppedInternshipRole(role)) {
+        continue
+      }
+      if (!isSpecificPostingUrl(href)) {
+        continue
+      }
+      listings.push({
+        id: `${idPrefix}-${slugPart(company)}-${slugPart(role)}-${slugPart(row.id)}`.slice(0, 96),
+        company,
+        role,
+        location: location || 'See posting',
+        url: normalizeUrl(href),
+        posted: formatIsoPosted(created),
+        postedAt: isoFromDateValue(created),
+        season: inferSeason(role),
+        track: inferTrack(role) === 'other' ? 'nonprofit' : inferTrack(role),
+        closed: false,
+        noSponsorship: false,
+        usCitizen: false,
+        ...extra,
+      })
+    }
+    if (!rows.length) {
+      break
+    }
+    offset += rows.length
+    pages += 1
+    await sleep(200)
+  }
+  return listings
+}
+
+async function fetchUnInternships() {
+  const [interns, volunteers] = await Promise.all([
+    fetchReliefWebJobs({ type: 'Internship', idPrefix: 'un' }),
+    fetchReliefWebJobs({
+      type: 'Volunteer',
+      source: 'UN Volunteers',
+      idPrefix: 'unv',
+      keepRole: isUnVolunteerRole,
+    }).catch((error) => {
+      process.stderr.write(`UN Volunteers: ${error.message}\n`)
+      return []
+    }),
+  ])
+  return [...interns, ...volunteers]
+}
+
+async function fetchPhenomInternships() {
+  const listings = []
+  for (const board of careerBoardsOfKind('phenom')) {
+    try {
+      listings.push(...await fetchPhenomBoard(board))
+    }
+    catch (error) {
+      process.stderr.write(`Phenom ${board.company}: ${error.message}\n`)
+    }
+    await sleep(150)
+  }
+  return listings
+}
+
 async function fetchCompanyInternships() {
-  const [ats, workday, amazon, google, meta] = await Promise.all([
+  const [ats, workday, amazon, google, meta, ford, rivian, phenom, un, exxon, twoSigma] = await Promise.all([
     fetchCompanyAtsInternships(),
     fetchCompanyWorkdayInternships(),
     fetchAmazonInternships().catch((error) => {
@@ -2184,8 +2629,29 @@ async function fetchCompanyInternships() {
       return []
     }),
     fetchMetaInternships(),
+    fetchFordInternships().catch((error) => {
+      process.stderr.write(`Ford: ${error.message}\n`)
+      return []
+    }),
+    fetchRivianInternships().catch((error) => {
+      process.stderr.write(`Rivian: ${error.message}\n`)
+      return []
+    }),
+    fetchPhenomInternships(),
+    fetchUnInternships().catch((error) => {
+      process.stderr.write(`UN: ${error.message}\n`)
+      return []
+    }),
+    fetchExxonInternships().catch((error) => {
+      process.stderr.write(`ExxonMobil: ${error.message}\n`)
+      return []
+    }),
+    fetchTwoSigmaInternships().catch((error) => {
+      process.stderr.write(`Two Sigma: ${error.message}\n`)
+      return []
+    }),
   ])
-  return [...ats, ...workday, ...amazon, ...google, ...meta]
+  return [...ats, ...workday, ...amazon, ...google, ...meta, ...ford, ...rivian, ...phenom, ...un, ...exxon, ...twoSigma]
 }
 
 async function fetchText(url) {
@@ -2357,7 +2823,7 @@ async function enrichTruncatedListings(listings, { onProgress } = {}) {
 
 function enrichExistingTitlesOnly() {
   return (async () => {
-    const raw = JSON.parse(readFileSync(OUT, 'utf8'))
+    const raw = readListingsSnapshot()
     process.stdout.write(`Enriching truncated internship titles in ${OUT}…\n`)
     const stats = await enrichTruncatedListings(raw.listings, {
       onProgress(done, total) {
@@ -2366,7 +2832,7 @@ function enrichExistingTitlesOnly() {
         }
       },
     })
-    writeFileSync(OUT, `${JSON.stringify(raw, null, 2)}\n`)
+    writeListingsSnapshot(raw)
     process.stdout.write(`Expanded ${stats.expanded}/${stats.targets} truncated titles\n`)
   })()
 }
@@ -2388,35 +2854,74 @@ async function writeSummaryProgress(label, listings, { force = false, persist } 
   return stats
 }
 
+function backfillCohortTerms(listings) {
+  let filled = 0
+  let corrected = 0
+  for (const item of listings) {
+    const info = extractInternshipTerm(item.role, item.url, item.term)
+    if (info) {
+      if (!item.term) {
+        item.term = info.term
+        filled += 1
+      }
+      if (item.season !== info.season) {
+        item.season = info.season
+        corrected += 1
+      }
+      continue
+    }
+    if (!item.term && item.season === 'summer') {
+      item.term = 'Summer 2027'
+      filled += 1
+    }
+  }
+  return { filled, corrected }
+}
+
 function enrichExistingSummariesOnly() {
   return (async () => {
-    const raw = JSON.parse(readFileSync(OUT, 'utf8'))
-    const persist = () => writeFileSync(OUT, `${JSON.stringify(raw, null, 2)}\n`)
+    const raw = readListingsSnapshot()
+    const offline = backfillCohortTerms(raw.listings)
+    process.stdout.write(
+      `Offline cohort terms: set ${offline.filled}, season-corrected ${offline.corrected}\n`,
+    )
+    const persist = () => writeListingsSnapshot(raw)
     await writeSummaryProgress(`Enriching posting summaries in ${OUT}…`, raw.listings, {
       force: process.argv.includes('--force'),
       persist,
     })
     const withSummary = raw.listings.filter((item) => item.summary).length
     const withKeywords = raw.listings.filter((item) => item.keywords).length
+    const withPay = raw.listings.filter((item) => item.payText || item.payMin != null).length
+    const withRequirements = raw.listings.filter((item) => item.requirements).length
+    const withDeadline = raw.listings.filter((item) => item.deadline).length
+    const withTerm = raw.listings.filter((item) => item.term).length
     persist()
-    process.stdout.write(`Summaries ${withSummary}/${raw.listings.length} · keywords ${withKeywords}/${raw.listings.length}\n`)
+    process.stdout.write(
+      `Summaries ${withSummary}/${raw.listings.length}`
+      + ` · keywords ${withKeywords}/${raw.listings.length}`
+      + ` · pay ${withPay}/${raw.listings.length}`
+      + ` · requirements ${withRequirements}/${raw.listings.length}`
+      + ` · deadlines ${withDeadline}/${raw.listings.length}`
+      + ` · terms ${withTerm}/${raw.listings.length}\n`,
+    )
   })()
 }
 
 function trackForListing(item) {
   const id = String(item.id || '')
   let next = inferTrack(item.role)
-  if (id.startsWith('biotech-') || /sanofi/i.test(item.company)) {
+  if (id.startsWith('biotech-') || /sanofi|johnson|abbott|lilly|gsk|novartis|abbvie/i.test(item.company)) {
     next = biotechFallbackTrack(item.company, item.role, next)
   }
-  if (id.startsWith('idealist-') && next === 'other') {
+  if ((id.startsWith('idealist-') || id.startsWith('un-') || id.startsWith('unv-')) && next === 'other') {
     next = 'nonprofit'
   }
   return next
 }
 
 function reclassifyExisting() {
-  const raw = JSON.parse(readFileSync(OUT, 'utf8'))
+  const raw = readListingsSnapshot()
   const before = {}
   const after = {}
   let changed = 0
@@ -2429,7 +2934,7 @@ function reclassifyExisting() {
     }
     after[item.track] = (after[item.track] || 0) + 1
   }
-  writeFileSync(OUT, `${JSON.stringify(raw, null, 2)}\n`)
+  writeListingsSnapshot(raw)
   process.stdout.write(
     `Reclassified ${changed}/${raw.listings.length} internship tracks in ${OUT}\n`
     + `  before other=${before.other || 0}\n`
@@ -2448,12 +2953,12 @@ async function main() {
     await enrichExistingTitlesOnly()
     return
   }
-  if (process.argv.includes('--enrich-summaries')) {
+  if (process.argv.includes('--enrich-summaries') || process.argv.includes('--summaries-only')) {
     await enrichExistingSummariesOnly()
     return
   }
   if (process.argv.includes('--company-only')) {
-    const raw = JSON.parse(readFileSync(OUT, 'utf8'))
+    const raw = readListingsSnapshot()
     process.stdout.write('Fetching official company career boards…\n')
     const existingAsOf = existsSync(OUT) ? statSync(OUT).mtime : new Date()
     const company = await fetchCompanyInternships()
@@ -2470,7 +2975,7 @@ async function main() {
       openCount,
       listings,
     }
-    writeFileSync(OUT, `${JSON.stringify(payload, null, 2)}\n`)
+    writeListingsSnapshot(payload)
     process.stdout.write(
       `Wrote ${listings.length} internships (${openCount} open) to ${OUT}\n`
       + `  company boards ${company.length} · net ${(listings.length - (raw.listings || []).length)}\n`,
@@ -2528,6 +3033,11 @@ async function main() {
   })
   process.stdout.write(`  expanded ${enrichStats.expanded}/${enrichStats.targets}\n`)
 
+  const offline = backfillCohortTerms(listings)
+  process.stdout.write(
+    `Offline cohort terms: set ${offline.filled}, season-corrected ${offline.corrected}\n`,
+  )
+
   await writeSummaryProgress('Enriching posting summaries from official apply pages…', listings)
 
   const openCount = listings.filter((item) => !item.closed).length
@@ -2545,6 +3055,9 @@ async function main() {
   if (idealist.length) {
     sources.push(SOURCE.idealist)
   }
+  if (company.some((item) => String(item.id || '').startsWith('un-') || String(item.id || '').startsWith('unv-'))) {
+    sources.push(SOURCE.un, SOURCE.unv)
+  }
 
   const payload = {
     scrapedAt: new Date().toISOString().slice(0, 10),
@@ -2556,7 +3069,7 @@ async function main() {
     listings,
   }
 
-  writeFileSync(OUT, `${JSON.stringify(payload, null, 2)}\n`)
+  writeListingsSnapshot(payload)
   process.stdout.write(
     `Wrote ${listings.length} internships (${openCount} open) to ${OUT}\n`
     + `  vansh ${vansh.length} · simplify ${simplify.length} · jobright ${jobright.length} · zapply ${zapply.length}`

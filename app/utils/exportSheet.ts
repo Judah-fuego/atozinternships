@@ -22,9 +22,9 @@ const HEADERS = [
   'Who can apply',
   'Location',
   'Apply',
-  'Deadline',
   'Applied',
   'Follow-up',
+  'Deadline',
   'Notes',
 ] as const
 
@@ -54,11 +54,11 @@ export function buildSheetRows(
     .map((listing) => {
       const saved = items[listing.id]
       return {
-        status: STATUS_LABEL[saved?.status ?? 'saved'],
+        status: STATUS_LABEL[saved?.status ?? 'applying'],
         company: listing.company,
         role: listing.role,
         who: eligibilityLine(listing),
-        location: listing.location,
+        location: saved?.location || listing.location,
         applyUrl: listing.url,
         deadline: isoDeadline(saved?.deadline) || isoDeadline(listing.deadline),
         appliedOn: saved?.appliedOn ?? '',
@@ -76,9 +76,9 @@ function rowValues(row: SheetRow) {
     row.who,
     row.location,
     row.applyUrl,
-    row.deadline,
     row.appliedOn,
     row.followUp,
+    row.deadline,
     row.notes,
   ]
 }

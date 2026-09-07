@@ -173,7 +173,7 @@ onBeforeUnmount(() => {
       :aria-expanded="open"
       @click.stop="toggle"
     >
-      <span>{{ selectedLabel }}</span>
+      <span>{{ selectedLabel || 'mm/dd/yyyy' }}</span>
       <span
         class="status-caret"
         aria-hidden="true"

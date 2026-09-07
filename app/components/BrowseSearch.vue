@@ -47,15 +47,38 @@ function onInput(event: Event) {
 </script>
 
 <template>
-  <input
-    class="search"
-    type="text"
-    :placeholder="placeholder"
-    :value="local"
-    autocomplete="off"
-    autocorrect="off"
-    spellcheck="false"
-    @input="onInput"
-    @keydown.enter.prevent="flush"
-  >
+  <label class="search-field">
+    <svg
+      class="search-icon"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
+      <circle
+        cx="6.5"
+        cy="6.5"
+        r="4.2"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+      />
+      <path
+        d="M10 10l3.5 3.5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+      />
+    </svg>
+    <input
+      class="search"
+      type="text"
+      :placeholder="placeholder"
+      :value="local"
+      autocomplete="off"
+      autocorrect="off"
+      spellcheck="false"
+      @input="onInput"
+      @keydown.enter.prevent="flush"
+    >
+  </label>
 </template>

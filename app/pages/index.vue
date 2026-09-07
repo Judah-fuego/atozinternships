@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { filterListings, sidebarFilterCount, sortListingsByPosted, type Filters, type PostedSort } from '~/data/listings'
+import { currentListings, filterListings, sidebarFilterCount, sortListingsByPosted, type Filters, type PostedSort } from '~/data/listings'
 import type { FolderPick } from '~/composables/useSaved'
 
 const PAGE = 40
@@ -52,7 +52,7 @@ const postedSortLabel = computed(() => {
 })
 const filterCount = computed(() => sidebarFilterCount(filters.value))
 const shown = computed(() => rows.value.slice(0, visible.value))
-const openCount = computed(() => listings.value.filter((item) => !item.closed).length)
+const openCount = computed(() => currentListings(listings.value).filter((item) => !item.closed).length)
 const selectedSet = computed(() => new Set(selected.value))
 const selectedCount = computed(() => selected.value.length)
 
@@ -244,9 +244,6 @@ function toggleSelecting() {
             <template v-else>
               {{ rows.length.toLocaleString() }} matching
               · {{ openCount.toLocaleString() }} open
-              <template v-if="scrapedAt">
-                · snapshot {{ scrapedAt }}
-              </template>
               ·
               <button
                 class="text-btn"
@@ -352,14 +349,20 @@ function toggleSelecting() {
           @unsave="saved.unsave(item.id)"
         />
       </div>
-      <button
-        v-if="shown.length < rows.length"
-        class="more"
-        type="button"
-        @click="visible += PAGE"
-      >
-        Show more ({{ (rows.length - shown.length).toLocaleString() }} left)
-      </button>
+      <div class="browse-more">
+        <button
+          v-if="shown.length < rows.length"
+          class="more"
+          type="button"
+          @click="visible += PAGE"
+        >
+          Show more ({{ (rows.length - shown.length).toLocaleString() }} left)
+        </button>
+        <span
+          v-if="scrapedAt"
+          class="browse-snapshot"
+        >snapshot {{ scrapedAt }}</span>
+      </div>
       <p class="browse-foot">
         Free internship finder for college students.
         <NuxtLink to="/guide">How to find internships</NuxtLink>

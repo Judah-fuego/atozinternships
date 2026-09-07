@@ -3,6 +3,10 @@
  * not a career-board homepage or an aggregator search page.
  */
 
+import { CAREER_BOARDS, careerBoardOverrides } from './career-boards.mjs'
+
+export { CAREER_BOARDS }
+
 export const AGGREGATOR_HOST = /(?:^|\.)(jobright\.ai|handshake\.com|joinhandshake\.com|linkedin\.com|indeed\.com|simplify\.jobs)$/i
 
 const JOB_ID_QUERY = /^(gh_jid|token|jk|career_job_req_id|jobid|job_id|jobreqid|requisitionid|reqid|jobcode)$/i
@@ -12,17 +16,13 @@ const LOCALE = /^[a-z]{2}(?:-[A-Z]{2})?$/
 
 /** Dedicated internship boards when the general careers page is a different place. */
 export const INTERNSHIP_BOARD_OVERRIDES = {
+  ...careerBoardOverrides(),
   'jane street': 'https://www.janestreet.com/join-jane-street/internships/',
-  google: 'https://www.google.com/about/careers/applications/jobs/results/?q=intern',
-  microsoft: 'https://apply.careers.microsoft.com/careers?query=intern',
-  apple: 'https://jobs.apple.com/en-us/search?search=intern&sort=relevance',
-  amazon: 'https://www.amazon.jobs/en/search?base_query=intern',
-  tesla: 'https://www.tesla.com/careers/search/?query=intern',
-  meta: 'https://www.metacareers.com/careerprograms/students',
   facebook: 'https://www.metacareers.com/careerprograms/students',
-  nvidia: 'https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite?q=intern',
   'y combinator': 'https://www.ycombinator.com/internships',
   usajobs: 'https://www.usajobs.gov/Search/Results?hp=student',
+  'united nations volunteers': 'https://app.unv.org/explore/assignments',
+  unv: 'https://app.unv.org/explore/assignments',
 }
 
 export function parseApplyUrl(url) {
@@ -107,6 +107,21 @@ export function isSpecificPostingUrl(url) {
   }
   if (/usajobs\.gov$/.test(host)) {
     return /\/job\/\d+/.test(path)
+  }
+  if (host === 'careers.un.org') {
+    return /\/jobsearchdescription\/\d+/i.test(path)
+  }
+  if (host === 'reliefweb.int') {
+    return /\/job\/\d+/.test(path)
+  }
+  if (host === 'app.unv.org') {
+    return parts.length >= 2 && looksLikeId(last)
+  }
+  if (host === 'careers.ford.com') {
+    return /\/job\/[^/]+\/[^/]+\/\d+\/\d+/.test(path)
+  }
+  if (host === 'careers.rivian.com') {
+    return /\/jobs\/\d+/.test(path)
   }
   if (host === 'workatastartup.com') {
     return /\/jobs\/\d+/.test(path)
@@ -259,6 +274,27 @@ export function boardFromApplyUrl(url) {
   if (host === 'tesla.com') {
     return { kind: 'tesla', boardUrl: INTERNSHIP_BOARD_OVERRIDES.tesla }
   }
+  if (host === 'careers.ford.com') {
+    return { kind: 'ford', boardUrl: INTERNSHIP_BOARD_OVERRIDES.ford }
+  }
+  if (host === 'careers.rivian.com') {
+    return { kind: 'rivian', boardUrl: INTERNSHIP_BOARD_OVERRIDES.rivian }
+  }
+  if (host === 'careers.honda.com') {
+    return { kind: 'honda', boardUrl: INTERNSHIP_BOARD_OVERRIDES.honda }
+  }
+  if (host === 'careers.toyota.com') {
+    return { kind: 'toyota', boardUrl: INTERNSHIP_BOARD_OVERRIDES.toyota }
+  }
+  if (host === 'careers.un.org' || host === 'inspira.un.org') {
+    return { kind: 'un', boardUrl: INTERNSHIP_BOARD_OVERRIDES['united nations'] }
+  }
+  if (host === 'app.unv.org' || host === 'unv.org') {
+    return { kind: 'unv', boardUrl: INTERNSHIP_BOARD_OVERRIDES['un volunteers'] }
+  }
+  if (host === 'reliefweb.int') {
+    return { kind: 'reliefweb', boardUrl: INTERNSHIP_BOARD_OVERRIDES['united nations'] }
+  }
   if (host === 'google.com' && /careers/.test(parsed.pathname)) {
     return { kind: 'google', boardUrl: INTERNSHIP_BOARD_OVERRIDES.google }
   }
@@ -320,6 +356,13 @@ export function internshipBoardForCompany(company, url) {
 
 export function companyInternshipBoards(listings) {
   const byCompany = new Map()
+  for (const board of CAREER_BOARDS) {
+    const name = String(board.company || '').trim()
+    if (!name || !board.boardUrl) {
+      continue
+    }
+    byCompany.set(name, { company: name, boardUrl: board.boardUrl, count: 0 })
+  }
   for (const item of listings || []) {
     const name = String(item.company || '').trim()
     if (!name) {

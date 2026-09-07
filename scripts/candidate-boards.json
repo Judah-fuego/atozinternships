@@ -1,0 +1,368 @@
+{
+  "generatedAt": "2026-09-06",
+  "note": "Superseded by scripts/mega-boards.json. Kept for history. High-hire internship employers researched 2026-09-06; most rows were copied into CAREER_BOARDS as kind:link and later upgraded or re-harvested.",
+  "count": 45,
+  "boards": [
+    {
+      "company": "Goldman Sachs",
+      "sector": "finance",
+      "boardUrl": "https://www.goldmansachs.com/careers/students/programs-and-internships",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Campus programs live on goldmansachs.com; experienced-hire search is higher.gs.com"
+    },
+    {
+      "company": "Morgan Stanley",
+      "sector": "finance",
+      "boardUrl": "https://morganstanley.tal.net/vx/lang-en-GB/mobile-0/brand-2/candidate",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Campus Application Center (TAL). Register to see intern vs full-time programs"
+    },
+    {
+      "company": "Bank of America",
+      "sector": "finance",
+      "boardUrl": "https://careers.bankofamerica.com/en-us/students",
+      "platform": "phenom",
+      "listingsNow": 0,
+      "notes": "2027 summer analyst programs are posted on the students portal"
+    },
+    {
+      "company": "Wells Fargo",
+      "sector": "finance",
+      "boardUrl": "https://www.wellsfargojobs.com/en/early-careers/",
+      "platform": "phenom",
+      "listingsNow": 0,
+      "notes": "Early Careers page lists 2027 summer internships across banking, risk, finance, and HR"
+    },
+    {
+      "company": "Two Sigma",
+      "sector": "finance",
+      "boardUrl": "https://careers.twosigma.com/",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Filter Experience Level = Internship. 2027 quant and research intern roles were live"
+    },
+    {
+      "company": "Blackstone",
+      "sector": "finance",
+      "boardUrl": "https://www.blackstone.com/careers/students/",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Summer Analyst / Associate programs; campus roles typically appear Jan–Mar"
+    },
+    {
+      "company": "Fidelity",
+      "sector": "finance",
+      "boardUrl": "https://jobs.fidelity.com/en/students/",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "10-week intern program plus separate asset-management student roles"
+    },
+    {
+      "company": "JPMorgan Chase",
+      "sector": "finance",
+      "boardUrl": "https://www.jpmorganchase.com/careers/explore-opportunities/students-and-graduates",
+      "platform": "custom",
+      "listingsNow": 2,
+      "notes": "Thin GitHub coverage only. Official students-and-graduates hub for summer programs"
+    },
+    {
+      "company": "McKinsey & Company",
+      "sector": "consulting",
+      "boardUrl": "https://www.mckinsey.com/careers/search-jobs",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Campus deadlines also at /careers/students/application-deadlines. Proprietary apply portal"
+    },
+    {
+      "company": "Boston Consulting Group",
+      "sector": "consulting",
+      "boardUrl": "https://careers.bcg.com",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "US Summer Associate applications are campus-cycled; search intern on careers.bcg.com"
+    },
+    {
+      "company": "Bain & Company",
+      "sector": "consulting",
+      "boardUrl": "https://www.bain.com/careers/",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Students section on the careers hub; dedicated /careers/roles/internships path 404s"
+    },
+    {
+      "company": "Deloitte",
+      "sector": "consulting",
+      "boardUrl": "https://apply.deloitte.com/careers/SearchJobs/?9339=[478]&9339_format=5915&listFilterMode=1&jobRecordsPerPage=10&sort=relevancy",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Internship-filtered apply portal. Overview: deloitte.com/us/en/careers/student-careers.html"
+    },
+    {
+      "company": "PwC",
+      "sector": "consulting",
+      "boardUrl": "https://jobs-us.pwc.com/us/en/search-results?keywords=intern",
+      "platform": "phenom",
+      "listingsNow": 0,
+      "notes": "Phenom widgets API works. Advance landing: jobs-us.pwc.com/us/en/advance"
+    },
+    {
+      "company": "EY",
+      "sector": "consulting",
+      "boardUrl": "https://www.ey.com/en_us/careers/internships-student-programs",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "US internships and student programs. Job search: careers.ey.com. Fall posting window"
+    },
+    {
+      "company": "KPMG",
+      "sector": "consulting",
+      "boardUrl": "https://uskpmgats.avature.net/campus",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "KPMG Campus (Avature) for internships and Leadership Edge programs"
+    },
+    {
+      "company": "Accenture",
+      "sector": "consulting",
+      "boardUrl": "https://accenture.wd103.myworkdayjobs.com/AccentureCareers?q=intern",
+      "platform": "workday",
+      "listingsNow": 0,
+      "notes": "Workday tenant accenture / AccentureCareers"
+    },
+    {
+      "company": "Walmart",
+      "sector": "consumer",
+      "boardUrl": "https://careers.walmart.com/us/en/home/careers-areas/students",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Students hub for undergrad, grad, and MBA internships. Generic /results?q=intern 404s"
+    },
+    {
+      "company": "PepsiCo",
+      "sector": "consumer",
+      "boardUrl": "https://www.pepsicojobs.com/main/jobs?keywords=Intern",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Official jobs site intern keyword search. Listings are JS-rendered"
+    },
+    {
+      "company": "The Coca-Cola Company",
+      "sector": "consumer",
+      "boardUrl": "https://www.coca-colacompany.com/careers/early-careers",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Ignite internships (US/Europe, Q1 window). careers.coca-colacompany.com/search-jobs/intern 404s"
+    },
+    {
+      "company": "Unilever",
+      "sector": "consumer",
+      "boardUrl": "https://unilever.wd3.myworkdayjobs.com/Unilever_Experienced_Professionals?q=intern",
+      "platform": "workday",
+      "listingsNow": 0,
+      "notes": "Workday tenant unilever / Unilever_Experienced_Professionals (intern titles are on this site)"
+    },
+    {
+      "company": "Starbucks",
+      "sector": "consumer",
+      "boardUrl": "https://careers.starbucks.com/discover-opportunities/internships/",
+      "platform": "phenom",
+      "listingsNow": 0,
+      "notes": "10-week Seattle HQ program. Search Internship in the Career Hub when apps open in fall"
+    },
+    {
+      "company": "Enterprise Mobility",
+      "sector": "consumer",
+      "boardUrl": "https://www.enterprisemobility.com/en/careers.html",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Management trainee internships posted as individual location jobs on enterprisemobility.com"
+    },
+    {
+      "company": "Mondelez International",
+      "sector": "consumer",
+      "boardUrl": "https://www.mondelezinternational.com/careers/",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "National Intern Day program. Search intern on the careers hub"
+    },
+    {
+      "company": "General Mills",
+      "sector": "consumer",
+      "boardUrl": "https://genmills.wd1.myworkdayjobs.com/GMI_External_Careers?q=intern",
+      "platform": "workday",
+      "listingsNow": 0,
+      "notes": "Workday tenant genmills / GMI_External_Careers"
+    },
+    {
+      "company": "Lockheed Martin",
+      "sector": "aerospace",
+      "boardUrl": "https://www.lockheedmartinjobs.com/search-jobs/intern/694/1",
+      "platform": "phenom",
+      "listingsNow": 0,
+      "notes": "Intern keyword search. Bare /search-jobs/intern 404s; use /intern/694/1. Co-op/Summer Intern filter also works"
+    },
+    {
+      "company": "NASA",
+      "sector": "aerospace",
+      "boardUrl": "https://stemgateway.nasa.gov",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "OSTEM internships (not Pathways). Overview: nasa.gov/learning-resources/internship-programs/. Pathways already covered via USAJobs"
+    },
+    {
+      "company": "The Aerospace Corporation",
+      "sector": "aerospace",
+      "boardUrl": "https://aerospace.org/students-and-recent-graduates",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "2026 National Intern Day #1 program. Cloudflare may block unattended fetches"
+    },
+    {
+      "company": "General Dynamics",
+      "sector": "aerospace",
+      "boardUrl": "https://www.gd.com/careers/interns",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Corporate intern search across business units. Existing listings are General Dynamics UK only"
+    },
+    {
+      "company": "Airbus",
+      "sector": "aerospace",
+      "boardUrl": "https://www.airbus.com/en/careers/students-and-graduates",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Students and graduates hub. Incapsula may block unattended fetches"
+    },
+    {
+      "company": "HII",
+      "sector": "aerospace",
+      "boardUrl": "https://hii.com/careers/",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Huntington Ingalls Industries. Search intern / students on the careers site"
+    },
+    {
+      "company": "ExxonMobil",
+      "sector": "energy",
+      "boardUrl": "https://jobs.exxonmobil.com/search/?q=intern",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Live STEM, business, trading, and PhD intern/co-op postings. Fall campus recruiting"
+    },
+    {
+      "company": "Shell",
+      "sector": "energy",
+      "boardUrl": "https://shell.wd3.myworkdayjobs.com/ShellCareers?q=intern",
+      "platform": "workday",
+      "listingsNow": 0,
+      "notes": "Workday tenant shell / ShellCareers. jobs.shell.com redirects here"
+    },
+    {
+      "company": "Halliburton",
+      "sector": "energy",
+      "boardUrl": "https://jobs.halliburton.com",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "National Intern Day program. Search intern on the jobs site"
+    },
+    {
+      "company": "Dow",
+      "sector": "energy",
+      "boardUrl": "https://corporate.dow.com/en-us/careers.html",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Campus internships across engineering, data, and finance. /students-and-graduates.html 404s"
+    },
+    {
+      "company": "Marathon Petroleum",
+      "sector": "energy",
+      "boardUrl": "https://jobs.marathonpetroleum.com",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "National Intern Day program. Search intern / student"
+    },
+    {
+      "company": "Occidental",
+      "sector": "energy",
+      "boardUrl": "https://careers.oxy.com",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Oxy early-career and intern search on careers.oxy.com"
+    },
+    {
+      "company": "UnitedHealth Group",
+      "sector": "healthcare",
+      "boardUrl": "https://www.unitedhealthgroup.com/careers/en/work/early-careers.html",
+      "platform": "phenom",
+      "listingsNow": 0,
+      "notes": "Internships and co-ops; filter Student Internships on the UHG careers search"
+    },
+    {
+      "company": "Regeneron",
+      "sector": "healthcare",
+      "boardUrl": "https://careers.regeneron.com/en/career-pathways/early-careers/",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "US intern/co-op apps typically August–November only at careers.regeneron.com"
+    },
+    {
+      "company": "Vertex Pharmaceuticals",
+      "sector": "healthcare",
+      "boardUrl": "https://vrtx.wd501.myworkdayjobs.com/vertex_careers?q=intern",
+      "platform": "workday",
+      "listingsNow": 0,
+      "notes": "Workday tenant vrtx / vertex_careers"
+    },
+    {
+      "company": "McKesson",
+      "sector": "healthcare",
+      "boardUrl": "https://careers.mckesson.com/en/early-talent",
+      "platform": "phenom",
+      "listingsNow": 0,
+      "notes": "Official early-talent page. They also recruit on Handshake; do not scrape Handshake"
+    },
+    {
+      "company": "Kaiser Permanente",
+      "sector": "healthcare",
+      "boardUrl": "https://www.kaiserpermanentejobs.org",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Search intern on kaiserpermanentejobs.org"
+    },
+    {
+      "company": "CIA",
+      "sector": "government",
+      "boardUrl": "https://www.cia.gov/careers/student-programs/",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Undergraduate intern/co-op and graduate studies. Apply 6–12 months before start. US citizen"
+    },
+    {
+      "company": "World Bank",
+      "sector": "government",
+      "boardUrl": "https://www.worldbank.org/ext/en/careers/talent-programs/wbg-pioneers",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "WBG Pioneers internship. Cycles Jan–Feb and Jul–Aug. Treasury intern posting was in DC"
+    },
+    {
+      "company": "Visa",
+      "sector": "other",
+      "boardUrl": "https://usa.visa.com/careers.html",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "University / intern roles on the Visa careers search. Broad functions, not only tech"
+    },
+    {
+      "company": "IBM",
+      "sector": "other",
+      "boardUrl": "https://www.ibm.com/careers/internships",
+      "platform": "custom",
+      "listingsNow": 0,
+      "notes": "Internships landing page. Search also at ibm.com/careers/search?q=intern"
+    }
+  ],
+  "supersededBy": "scripts/mega-boards.json"
+}

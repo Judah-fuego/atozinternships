@@ -35,6 +35,8 @@ const DEAD_BODY = [
   /no longer accepting applications/i,
   /applications? (for this (job|position|role) )?(are|have been) closed/i,
   /page you(?:'| a)?re looking for (doesn'?t|does not) exist/i,
+  /la page que vous recherchez n'?existe pas/i,
+  /sorry!?\s+an unexpected error has occurred/i,
   /<title[^>]*>\s*(page not found|404|job not found)/i,
   />\s*job not found\s*</i,
 ]
@@ -86,6 +88,28 @@ export function ashbyUnavailable(url, body) {
 
 export function ashbyJobListed(id, jobs) {
   return (jobs || []).some((job) => job && job.id === id)
+}
+
+/** ADP Workforce Now needs cid+jobId; without cid the SPA always shows a generic error. */
+export function adpRecruitmentRef(url) {
+  try {
+    const parsed = new URL(String(url || ''))
+    if (!/workforcenow\.adp\.com$/i.test(parsed.hostname)) {
+      return null
+    }
+    const jobId = parsed.searchParams.get('jobId') || parsed.searchParams.get('jobid')
+    if (!jobId) {
+      return null
+    }
+    return {
+      jobId,
+      cid: parsed.searchParams.get('cid') || '',
+      ccId: parsed.searchParams.get('ccId') || parsed.searchParams.get('ccid') || '',
+    }
+  }
+  catch {
+    return null
+  }
 }
 
 function classifyBody(url, status, body) {
@@ -143,13 +167,68 @@ async function liveAshbyIds(board) {
   }
 }
 
+async function probeAdp(url) {
+  const ref = adpRecruitmentRef(url)
+  if (!ref) {
+    return null
+  }
+  if (!ref.cid) {
+    return { verdict: 'dead', reason: 'adp-incomplete', status: 0, finalUrl: url }
+  }
+  const params = new URLSearchParams({ jobId: ref.jobId, cid: ref.cid })
+  if (ref.ccId) {
+    params.set('ccId', ref.ccId)
+  }
+  const api = `https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/client-features?${params}`
+  try {
+    const res = await fetch(api, {
+      redirect: 'follow',
+      headers: {
+        'user-agent': UA,
+        accept: 'application/json, text/plain, */*',
+      },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (DEAD_STATUS.has(res.status) || res.status >= 500) {
+      return { verdict: 'dead', reason: 'adp-missing', status: res.status, finalUrl: api }
+    }
+    if (res.status === 200) {
+      return { verdict: 'ok', reason: 'adp-api', status: 200, finalUrl: api }
+    }
+    if (res.status === 401 || res.status === 403 || res.status === 429) {
+      return null
+    }
+    return null
+  }
+  catch {
+    return null
+  }
+}
+
 async function probeAtsApi(url) {
+  const adp = await probeAdp(url)
+  if (adp) {
+    return adp
+  }
   const target = parseApplyTarget(url)
-  if (!target || (target.kind !== 'greenhouse' && target.kind !== 'lever')) {
+  if (!target || (target.kind !== 'greenhouse' && target.kind !== 'lever' && target.kind !== 'workday')) {
     return null
   }
   try {
     const { status, json } = await fetchJson(target.api)
+    if (target.kind === 'workday') {
+      // Closed Workday postings often 403 with S22 ("permission denied") instead of 404.
+      if (status === 200 && json?.jobPostingInfo?.title) {
+        return { verdict: 'ok', reason: 'workday-api', status, finalUrl: target.api }
+      }
+      if (DEAD_STATUS.has(status) || status === 404) {
+        return { verdict: 'dead', reason: 'workday-missing', status, finalUrl: target.api }
+      }
+      if (status === 403 && (json?.errorCode === 'S22' || /permission denied/i.test(String(json?.message || '')))) {
+        return { verdict: 'dead', reason: 'workday-unavailable', status, finalUrl: target.api }
+      }
+      return null
+    }
     if (DEAD_STATUS.has(status) || status === 404) {
       return { verdict: 'dead', reason: `${target.kind}-missing`, status, finalUrl: target.api }
     }
@@ -245,8 +324,11 @@ export async function pruneDeadInternshipListings(listings, { onProgress } = {})
     const ashby = ashbyPostingRef(url)
     const listed = ashby ? ashbyLive.get(ashby.board) : null
     let result
-    if (listed?.has(ashby.id)) {
-      result = { verdict: 'ok', reason: 'ashby-api', status: 200, finalUrl: url }
+    if (listed) {
+      // Board API is authoritative: missing id means the posting is gone.
+      result = listed.has(ashby.id)
+        ? { verdict: 'ok', reason: 'ashby-api', status: 200, finalUrl: url }
+        : { verdict: 'dead', reason: 'ashby-missing', status: 404, finalUrl: url }
     }
     else {
       result = await probe(url)

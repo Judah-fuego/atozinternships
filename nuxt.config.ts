@@ -36,7 +36,7 @@ export default defineNuxtConfig({
   vite: {
     server: {
       watch: {
-        ignored: ['**/node_modules/**', '**/app/data/listings.json'],
+        ignored: ['**/node_modules/**', '**/app/data/listings.json', '**/app/data/listing-summaries.json'],
       },
     },
   },
