@@ -85,15 +85,15 @@ const PERK_LINE = /opportunity to publish|attend (?:tier[-\s]?1 |industry )?conf
 
 const SOFT_TRAIT = /^(?:thoughtful|empathetic|team player|ai enthusiast|put users first|not ideological|problem-?solving|communication|collaborat|you(?:'|’)re comfortable|you enjoy|you care|you think|you understand|you may be opinionated|for you,)/i
 
-const DUTY_HEADING = /^(?:what you(?:'|’)?ll (?:do|get to work on|be working on|work on)|what you will (?:do|get to work on|be working on|work on)|what you get to work on|what to expect|responsibilit(?:y|ies)(?:\s*[&/:].*)?|key (?:tasks|duties|responsibilities)|day[- ]to[- ]day|about (?:the |this )?(?:role|internship|position|job)|the (?:role|internship|position)|your (?:role|work|impact)|how you(?:'|’)?ll|in this (?:role|internship)|(?:job|position) (?:summary|description)|overview|the opportunity|potential project areas|role description)$/i
+const DUTY_HEADING = /^(?:what you(?:'|’)?ll (?:do|get to work on|be working on|work on)|what you will (?:do|get to work on|be working on|work on)|what you get to work on|what to expect|responsibilit(?:y|ies)(?:\s*(?:may\s+include|[&/:]).*)?|key (?:tasks|duties|responsibilities)|day[- ]to[- ]day|about (?:the |this )?(?:role|internship|position|job)|the (?:role|internship|position|opportunity)|your (?:role|work|impact)|how you(?:'|’)?ll|in this (?:role|internship)|(?:job|position) (?:summary|description)|overview|the opportunity|potential project areas|role description)$/i
 
-const DUTY_HEADING_PREFIX = /^(?:what type of work|how will you make an impact|what you(?:'|’)?ll get to work on|what you will get to work on)\b/i
+const DUTY_HEADING_PREFIX = /^(?:what type of work|how will you make an impact|what you(?:'|’)?ll get to work on|what you will get to work on|responsibilities may include)\b/i
 
-const SKILL_HEADING = /^(?:qualifications?|requirements?|basic qualifications?|preferred qualifications?|minimum qualifications?|required (?:skills|qualifications)|preferred (?:skills|experience)|technical skills|skills(?: we| you| required| needed)?|what (?:we(?:'|’)re looking for|you(?:'|’)?ll (?:need|bring)|you bring)|must have|who you are|about you|you may be a good fit|required|preferred)$/i
+const SKILL_HEADING = /^(?:qualifications?|requirements?|basic qualifications?|preferred qualifications?|minimum qualifications?|required (?:skills|qualifications)|preferred (?:skills|experience)|technical skills|skills(?: we| you| required| needed)?|what (?:we(?:'|’)re looking for|you(?:'|’)?ll (?:need|bring)|you bring)|must have|who you are|about you|you may be a good fit|you have|nice if you have|required|preferred)$/i
 
-const SKIP_HEADING = /^(?:about (?:us|the company|the team|american express)|who we are|our (?:culture|values|mission|benefits|core principles)|benefits|compensation|perks|equal opportunity|how to apply|to apply|legal|eeo|diversity|accommodation|work flexibility|what you get|why (?:join|us|you.?ll love)|life at|company description|additional information|learning opportunities|what you(?:'|’)?ll learn|preferred characteristics|physical(?: and| &)? environmental demands|time travel required|candidate value proposition)$/i
+const SKIP_HEADING = /^(?:about (?:us|the company|the team|american express)|who we are|our (?:culture|values|mission|benefits|core principles)|benefits|compensation|perks|equal opportunity|how to apply|to apply|legal|eeo|diversity|accommodation|work flexibility|what you get|why (?:join|us|you.?ll love)|life at|company description|additional information|learning opportunities|what you(?:'|’)?ll learn|preferred characteristics|physical(?: and| &)? environmental demands|time travel required|candidate value proposition|clearance)$/i
 
-const ACTION_START = /^(?:you(?:'|’)?ll|you will|the intern(?:s)? will|interns? will|this (?:intern|role) will)?\s*(?:design|develop|build|create|write|implement|analyze|research|support|help|work(?:ing)? (?:on|with|alongside)|collaborate|assist|contribute|own|improve|test|debug|maintain|deploy|train|review|document|present|partner|drive|deliver|produce|evaluate|model|simulate|prototype|code|program|optimize|productionize|apply|use|perform|conduct|participate|lead|manage|coordinate|prepare|translate|define|instrument|monitor|harden|operate|ship|orchestrat\w*|scale)/i
+const ACTION_START = /^(?:you(?:'|’)?ll|you will|the intern(?:s)? will|interns? will|this (?:intern|role) will)?\s*(?:design|develop|build|create|write|implement|analyze|research|support|help|work(?:ing)? (?:on|with|alongside)|collaborate|assist|contribute|own|improve|test|debug|maintain|deploy|train|review|document|present|partner|drive|deliver|produce|evaluate|model|simulate|prototype|code|program|optimize|productionize|apply|use|perform|conduct|participate|lead|manage|coordinate|prepare|translate|define|instrument|monitor|harden|operate|ship|orchestrat\w*|scale|specify|calculate|identify|explore|investigate|integrate|measure|collect|meet)/i
 
 const WEAK_META = /view our opening|see all open jobs|learn more about what it|click the link|complete job description|current openings/i
 
@@ -199,16 +199,21 @@ function isHeading(line) {
   return ''
 }
 
+function stripBulletPrefix(line) {
+  return String(line || '').replace(/^[-•*–—]\s+/, '').replace(/\s+/g, ' ').trim()
+}
+
 function splitHeadingRuns(text) {
   return String(text || '')
-    .replace(/\s*[•·*]\s*/g, '\n• ')
-    .replace(/\s+(?=(?:What You(?:'|’)ll (?:Do|Get to Work On|Be Working On|Work On)|What You Will (?:Do|Get to Work On|Be Working On|Work On)|What You Get to Work On|What To Expect|What You(?:'|’)ll Learn|What type of work|How will you make an impact|Key Responsibilities|(?<!Key )Responsibilities|Minimum Qualifications|Preferred Qualifications|Basic Qualifications|Required Skills|Technical Skills|(?<!(?:Minimum|Preferred|Basic) )Qualifications|Requirements|About the Role|About This Role|About the Internship|About the Team|Job Description|Job Summary|Position Summary|Role Description|What You(?:'|’)ll Bring|What You Bring|What We(?:'|’)re Looking For|About Us|About the Company|Benefits|Compensation|How to Apply|Business Unit(?:\/Role)?(?: Specific)?(?: Info(?:rmation)?)?|Potential Project Areas|Learning Opportunities|Candidate Value Proposition)\b)/gi, '\n')
+    .replace(/\s*[•·*]\s+/g, '\n• ')
+    .replace(/(?:^|\n)\s*[-–—]\s+(?=[A-Za-z])/g, '\n• ')
+    .replace(/\s+(?=(?:What You(?:'|’)ll (?:Do|Get to Work On|Be Working On|Work On)|What You Will (?:Do|Get to Work On|Be Working On|Work On)|What You Get to Work On|What To Expect|What You(?:'|’)ll Learn|What type of work|How will you make an impact|Key Responsibilities|Responsibilities may include|(?<!Key )Responsibilities|Minimum Qualifications|Preferred Qualifications|Basic Qualifications|Required Skills|Technical Skills|(?<!(?:Minimum|Preferred|Basic) )Qualifications|Requirements|About the Role|About This Role|About the Internship|About the Team|The Opportunity|Job Description|Job Summary|Position Summary|Role Description|What You(?:'|’)ll Bring|What You Bring|What We(?:'|’)re Looking For|You Have|Nice If You Have|About Us|About the Company|Benefits|Compensation|How to Apply|Business Unit(?:\/Role)?(?: Specific)?(?: Info(?:rmation)?)?|Potential Project Areas|Learning Opportunities|Candidate Value Proposition)\b)/gi, '\n')
 }
 
 function expandLines(lines) {
   return lines.flatMap((line) => line
-    .split(/(?<=[.!?])\s+(?=[A-Z•])/)
-    .map((part) => part.replace(/^•\s*/, '').replace(/\s+/g, ' ').trim())
+    .split(/(?<=[.!?])\s+(?=[A-Z•\-])/)
+    .map((part) => stripBulletPrefix(part))
     .filter((part) => part.length >= 12))
 }
 
@@ -227,7 +232,7 @@ function sectionize(text) {
   }
 
   for (const raw of prepared.split('\n')) {
-    const line = raw.replace(/^•\s*/, '').replace(/\s+/g, ' ').trim()
+    const line = stripBulletPrefix(raw)
     if (!line) {
       continue
     }
@@ -284,9 +289,14 @@ function isUsefulDuty(line) {
   if (/^(?:pursuing|currently (?:pursuing|enrolled)|must (?:be|graduate)|graduat)/i.test(line)) {
     return false
   }
-  // Real work copy — not a qualifications bullet that happens to name Python.
-  return ACTION_START.test(line)
-    || /you(?:'|’| wi)ll|intern(?:s)? will|this (?:role|intern) will|responsibilit/i.test(line)
+  if (ACTION_START.test(line)) {
+    return true
+  }
+  // Soft "you will be a key player…" lines need a real work verb — not ownership fluff alone.
+  if (/you(?:'|’| wi)ll|intern(?:s)? will|this (?:role|intern) will/i.test(line)) {
+    return /\b(?:design|develop|build|create|write|implement|analyze|research|support|help|work(?:ing)?|collaborat\w*|assist|contribute|own|improve|test|debug|maintain|deploy|train|review|document|present|partner|drive|deliver|produce|evaluate|model|simulate|prototype|code|program|optimize|apply|use|perform|conduct|participate|lead|manage|managing|coordinate|prepare|translate|define|instrument|monitor|harden|operate|ship|scale|specify|calculate|identify|explore|investigate|integrate|measure|collect)\b/i.test(line)
+  }
+  return /responsibilit/i.test(line)
 }
 
 function scoreDuty(line) {
@@ -325,13 +335,17 @@ function scoreDuty(line) {
 }
 
 function pickLines(lines, max) {
-  return lines
+  const ranked = lines
     .map((line, index) => ({ line, index, score: scoreDuty(line) }))
     .filter((row) => row.score > 0)
     .sort((a, b) => b.score - a.score || a.index - b.index)
+  // When concrete action bullets exist, drop soft "you will be a key player" filler.
+  const strong = ranked.filter((row) => ACTION_START.test(row.line))
+  const pool = strong.length >= 2 ? strong : ranked
+  return pool
     .slice(0, max)
     .sort((a, b) => a.index - b.index)
-    .map((row) => row.line.replace(/^[•\-*]\s*/, ''))
+    .map((row) => row.line.replace(/^[-•*–—]\s*/, ''))
 }
 
 function pickDuties(sections, max = 5) {
@@ -349,6 +363,38 @@ function pickDuties(sections, max = 5) {
   }
   // Never promote a qualifications bullet into the About blurb.
   return []
+}
+
+const OPPORTUNITY_SKIP = /clearance|compensation|salary|benefit|equal opportunity|security investigation|applicants selected|projected compensation|\$[\d,]+|visit www\.|nasdaq:/i
+
+function isOpportunityLine(line) {
+  if (!line || line.length < 60) {
+    return false
+  }
+  if (headingLabel(line)) {
+    return false
+  }
+  if (SKIP_SENTENCE.test(line) || DATE_ONLY.test(line) || QUAL_LINE.test(line) || PERK_LINE.test(line) || SOFT_TRAIT.test(line)) {
+    return false
+  }
+  if (OPPORTUNITY_SKIP.test(line) || COMPANY_ABOUT.test(line)) {
+    return false
+  }
+  if (/^(?:you have|nice if you have|clearance|compensation|join us\.?$)\b/i.test(line)) {
+    return false
+  }
+  return /(?:intern|team|project|develop|challenge|solution|work(?:ing)? on|collaborat|build|design|research|solve|breakthrough|accelerator)/i.test(line)
+}
+
+function pickOpportunity(sections, maxChars = 720) {
+  const lines = sections
+    .filter((row) => row.kind === 'duty' || row.kind === 'body')
+    .flatMap((row) => row.lines)
+    .filter(isOpportunityLine)
+  if (!lines.length) {
+    return ''
+  }
+  return composeSummary(lines.slice(0, 3), { maxChars })
 }
 
 function skillText(sections, fallback) {
@@ -420,7 +466,12 @@ export function summarizePosting(text, { maxChars = 720 } = {}) {
   if (out && !SKIP_SENTENCE.test(out) && !WEAK_META.test(out) && !isWeakSummary(out)) {
     return out
   }
-  // No real work copy — leave About empty. Mentions / requirements still fill their own fields.
+
+  // Opportunity / program copy when the posting never lists concrete duties.
+  out = pickOpportunity(sections, maxChars)
+  if (out && !SKIP_SENTENCE.test(out) && !WEAK_META.test(out) && !isWeakSummary(out)) {
+    return out
+  }
   return ''
 }
 
@@ -1257,12 +1308,7 @@ function embeddedJsonDescription(html) {
 }
 
 function mainContentHtml(html) {
-  const stripped = String(html || '')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
-    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
-    .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+  const stripped = stripChromeHtml(html)
   const regions = [
     /<(?:div|section|article)[^>]*(?:id|class)=["'][^"']*(?:job-?description|jobDescription|posting-?description|job-?details|job_description|opening-description)[^"']*["'][^>]*>([\s\S]{120,20000}?)<\/(?:div|section|article)>/i,
     /<(?:div|section)[^>]*(?:id|class)=["'][^"']*(?:content|main)[^"']*["'][^>]*>([\s\S]{200,20000}?)<\/(?:div|section)>/i,
@@ -1276,6 +1322,28 @@ function mainContentHtml(html) {
   return ''
 }
 
+function stripChromeHtml(html) {
+  return String(html || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
+    .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+}
+
+function looksLikePostingBody(text) {
+  const value = flatten(text)
+  if (value.length < 160 || WEAK_META.test(value)) {
+    return false
+  }
+  return /responsibilit|what you(?:'|’)ll|you will|qualifications?|requirements?|key (?:tasks|duties)|the opportunity|intern/i.test(value)
+}
+
+function pageBodyText(html) {
+  const text = htmlToText(stripChromeHtml(html))
+  return looksLikePostingBody(text) ? text : ''
+}
+
 function usefulMeta(html) {
   const og = metaContent(html, 'og:description') || metaContent(html, 'description')
   if (!og || WEAK_META.test(og) || og.length < 80) {
@@ -1284,9 +1352,23 @@ function usefulMeta(html) {
   return og
 }
 
-async function fetchJson(url) {
+async function fetchJson(url, { referer = '' } = {}) {
+  const headers = {
+    'user-agent': UA,
+    accept: 'application/json,text/plain,*/*',
+    'accept-language': 'en-US,en;q=0.9',
+  }
+  if (referer) {
+    headers.referer = referer
+    try {
+      headers.origin = new URL(referer).origin
+    }
+    catch {
+      // ignore bad referer
+    }
+  }
   const response = await fetch(url, {
-    headers: { 'user-agent': UA, accept: 'application/json' },
+    headers,
     redirect: 'follow',
     signal: AbortSignal.timeout(TIMEOUT_MS),
   })
@@ -1302,6 +1384,11 @@ async function fetchHtml(url) {
       'user-agent': UA,
       accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
       'accept-language': 'en-US,en;q=0.9',
+      'cache-control': 'no-cache',
+      'sec-fetch-dest': 'document',
+      'sec-fetch-mode': 'navigate',
+      'sec-fetch-site': 'none',
+      'upgrade-insecure-requests': '1',
     },
     redirect: 'follow',
     signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -1361,7 +1448,7 @@ function textFromOracle(data) {
   return job?.ShortDescriptionStr || ''
 }
 
-function textFromHtml(html) {
+export function textFromHtml(html) {
   const jsonLd = jsonLdDescription(html)
   const embedded = embeddedJsonDescription(html)
   const main = mainContentHtml(html)
@@ -1371,6 +1458,10 @@ function textFromHtml(html) {
     .sort((a, b) => b.text.length - a.text.length)
   if (candidates[0]) {
     return candidates[0].value
+  }
+  const body = pageBodyText(html)
+  if (body) {
+    return body
   }
   return usefulMeta(html)
 }
@@ -1476,7 +1567,12 @@ export async function fetchPostingText(url) {
       }
     }
     if (target.kind === 'tesla') {
-      return { text: textFromTesla(await fetchJson(target.api)), title: '', html: '', deadline: '' }
+      return {
+        text: textFromTesla(await fetchJson(target.api, { referer: 'https://www.tesla.com/careers/' })),
+        title: '',
+        html: '',
+        deadline: '',
+      }
     }
     if (target.kind === 'oracle') {
       return { text: textFromOracle(await fetchJson(target.api)), title: '', html: '', deadline: '' }

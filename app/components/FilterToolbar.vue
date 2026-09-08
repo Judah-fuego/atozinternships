@@ -30,7 +30,6 @@ const emit = defineEmits<{
 
 const filters = defineModel<Filters>({ required: true })
 const expanded = ref<Family[]>([])
-const moreOpen = ref(false)
 const { listings } = useListings()
 
 const activeCount = computed(() => sidebarFilterCount(filters.value))
@@ -43,23 +42,6 @@ const familyOrder = computed(() => {
     .sort((a, b) => (counts.value.families[b] ?? 0) - (counts.value.families[a] ?? 0))
   return [...ranked, 'other' as Family]
 })
-
-const moreActive = computed(() => {
-  const f = filters.value
-  return Boolean(
-    (f.who && f.who !== 'all')
-    || (f.sources?.length)
-    || (f.status && f.status !== 'open')
-    || (f.pay && f.pay !== 'all')
-    || (f.minHourly && f.minHourly > 0),
-  )
-})
-
-watch(moreActive, (active) => {
-  if (active) {
-    moreOpen.value = true
-  }
-}, { immediate: true })
 
 const locationOptions = computed(() =>
   LOCATION_ORDER.map((id) => ({
@@ -451,157 +433,128 @@ function clearFilters() {
       </div>
 
       <div class="filter-group">
-        <button
-          class="filter-more"
-          type="button"
-          :aria-expanded="moreOpen"
-          aria-controls="filter-more"
-          @click="moreOpen = !moreOpen"
-        >
-          <span
-            class="field-caret"
-            aria-hidden="true"
-          />
-          More
-          <span
-            v-if="moreActive"
-            class="filter-more-dot"
-            aria-hidden="true"
-          />
-        </button>
-        <div
-          id="filter-more"
-          class="filter-reveal"
-          :class="{ 'is-open': moreOpen }"
-          :inert="!moreOpen"
-        >
-          <div class="filter-reveal-inner">
-            <div class="filter-group">
-              <span class="filter-label">Who</span>
-              <div class="filter-options is-inline is-pick">
-                <button
-                  class="chip"
-                  :class="{ 'is-on': (filters.who ?? 'all') === 'all' }"
-                  type="button"
-                  :aria-pressed="(filters.who ?? 'all') === 'all'"
-                  @click="setWho('all')"
-                >
-                  All
-                  <span class="chip-count">{{ formatCount(counts.who.all) }}</span>
-                </button>
-                <button
-                  class="chip"
-                  :class="{ 'is-on': filters.who === 'undergrad' }"
-                  type="button"
-                  :aria-pressed="filters.who === 'undergrad'"
-                  @click="setWho('undergrad')"
-                >
-                  Undergrad
-                  <span class="chip-count">{{ formatCount(counts.who.undergrad) }}</span>
-                </button>
-                <button
-                  class="chip"
-                  :class="{ 'is-on': filters.who === 'grad' }"
-                  type="button"
-                  :aria-pressed="filters.who === 'grad'"
-                  @click="setWho('grad')"
-                >
-                  Grad
-                  <span class="chip-count">{{ formatCount(counts.who.grad) }}</span>
-                </button>
-              </div>
-            </div>
+        <span class="filter-label">Who</span>
+        <div class="filter-options is-inline is-pick">
+          <button
+            class="chip"
+            :class="{ 'is-on': (filters.who ?? 'all') === 'all' }"
+            type="button"
+            :aria-pressed="(filters.who ?? 'all') === 'all'"
+            @click="setWho('all')"
+          >
+            All
+            <span class="chip-count">{{ formatCount(counts.who.all) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.who === 'undergrad' }"
+            type="button"
+            :aria-pressed="filters.who === 'undergrad'"
+            @click="setWho('undergrad')"
+          >
+            Undergrad
+            <span class="chip-count">{{ formatCount(counts.who.undergrad) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.who === 'grad' }"
+            type="button"
+            :aria-pressed="filters.who === 'grad'"
+            @click="setWho('grad')"
+          >
+            Grad
+            <span class="chip-count">{{ formatCount(counts.who.grad) }}</span>
+          </button>
+        </div>
+      </div>
 
-            <div class="filter-group">
-              <span class="filter-label">Found on</span>
-              <div class="filter-options is-inline">
-                <button
-                  v-for="id in SOURCE_ORDER"
-                  :key="id"
-                  class="chip"
-                  :class="{ 'is-on': selectedSources.has(id) }"
-                  type="button"
-                  :aria-pressed="selectedSources.has(id)"
-                  @click="toggleSource(id)"
-                >
-                  {{ SOURCE_LABEL[id] }}
-                  <span class="chip-count">{{ formatCount(counts.sources[id] ?? 0) }}</span>
-                </button>
-              </div>
-            </div>
+      <div class="filter-group">
+        <span class="filter-label">Found on</span>
+        <div class="filter-options is-inline">
+          <button
+            v-for="id in SOURCE_ORDER"
+            :key="id"
+            class="chip"
+            :class="{ 'is-on': selectedSources.has(id) }"
+            type="button"
+            :aria-pressed="selectedSources.has(id)"
+            @click="toggleSource(id)"
+          >
+            {{ SOURCE_LABEL[id] }}
+            <span class="chip-count">{{ formatCount(counts.sources[id] ?? 0) }}</span>
+          </button>
+        </div>
+      </div>
 
-            <div class="filter-group">
-              <span class="filter-label">Pay</span>
-              <div class="filter-options is-inline is-pick">
-                <button
-                  class="chip"
-                  :class="{ 'is-on': (filters.pay ?? 'all') === 'all' && !filters.minHourly }"
-                  type="button"
-                  :aria-pressed="(filters.pay ?? 'all') === 'all' && !filters.minHourly"
-                  @click="setPay('all'); setMinHourly(undefined)"
-                >
-                  All
-                  <span class="chip-count">{{ formatCount(counts.pay.all) }}</span>
-                </button>
-                <button
-                  class="chip"
-                  :class="{ 'is-on': filters.pay === 'disclosed' }"
-                  type="button"
-                  :aria-pressed="filters.pay === 'disclosed'"
-                  @click="setPay(filters.pay === 'disclosed' ? 'all' : 'disclosed')"
-                >
-                  Disclosed
-                  <span class="chip-count">{{ formatCount(counts.pay.disclosed) }}</span>
-                </button>
-                <button
-                  class="chip"
-                  :class="{ 'is-on': filters.minHourly === 40 }"
-                  type="button"
-                  :aria-pressed="filters.minHourly === 40"
-                  @click="setMinHourly(filters.minHourly === 40 ? undefined : 40)"
-                >
-                  ≥ $40/hr
-                  <span class="chip-count">{{ formatCount(counts.minHourly['40']) }}</span>
-                </button>
-                <button
-                  class="chip"
-                  :class="{ 'is-on': filters.minHourly === 50 }"
-                  type="button"
-                  :aria-pressed="filters.minHourly === 50"
-                  @click="setMinHourly(filters.minHourly === 50 ? undefined : 50)"
-                >
-                  ≥ $50/hr
-                  <span class="chip-count">{{ formatCount(counts.minHourly['50']) }}</span>
-                </button>
-                <button
-                  class="chip"
-                  :class="{ 'is-on': filters.minHourly === 60 }"
-                  type="button"
-                  :aria-pressed="filters.minHourly === 60"
-                  @click="setMinHourly(filters.minHourly === 60 ? undefined : 60)"
-                >
-                  ≥ $60/hr
-                  <span class="chip-count">{{ formatCount(counts.minHourly['60']) }}</span>
-                </button>
-              </div>
-            </div>
+      <div class="filter-group">
+        <span class="filter-label">Pay</span>
+        <div class="filter-options is-inline is-pick">
+          <button
+            class="chip"
+            :class="{ 'is-on': (filters.pay ?? 'all') === 'all' && !filters.minHourly }"
+            type="button"
+            :aria-pressed="(filters.pay ?? 'all') === 'all' && !filters.minHourly"
+            @click="setPay('all'); setMinHourly(undefined)"
+          >
+            All
+            <span class="chip-count">{{ formatCount(counts.pay.all) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.pay === 'disclosed' }"
+            type="button"
+            :aria-pressed="filters.pay === 'disclosed'"
+            @click="setPay(filters.pay === 'disclosed' ? 'all' : 'disclosed')"
+          >
+            Disclosed
+            <span class="chip-count">{{ formatCount(counts.pay.disclosed) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.minHourly === 40 }"
+            type="button"
+            :aria-pressed="filters.minHourly === 40"
+            @click="setMinHourly(filters.minHourly === 40 ? undefined : 40)"
+          >
+            ≥ $40/hr
+            <span class="chip-count">{{ formatCount(counts.minHourly['40']) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.minHourly === 50 }"
+            type="button"
+            :aria-pressed="filters.minHourly === 50"
+            @click="setMinHourly(filters.minHourly === 50 ? undefined : 50)"
+          >
+            ≥ $50/hr
+            <span class="chip-count">{{ formatCount(counts.minHourly['50']) }}</span>
+          </button>
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.minHourly === 60 }"
+            type="button"
+            :aria-pressed="filters.minHourly === 60"
+            @click="setMinHourly(filters.minHourly === 60 ? undefined : 60)"
+          >
+            ≥ $60/hr
+            <span class="chip-count">{{ formatCount(counts.minHourly['60']) }}</span>
+          </button>
+        </div>
+      </div>
 
-            <div class="filter-group">
-              <span class="filter-label">Status</span>
-              <div class="filter-options is-inline">
-                <button
-                  class="chip"
-                  :class="{ 'is-on': filters.status === 'all' }"
-                  type="button"
-                  :aria-pressed="filters.status === 'all'"
-                  @click="setStatus(filters.status === 'all' ? 'open' : 'all')"
-                >
-                  Include closed
-                  <span class="chip-count">{{ formatCount(counts.status.all) }}</span>
-                </button>
-              </div>
-            </div>
-          </div>
+      <div class="filter-group">
+        <span class="filter-label">Status</span>
+        <div class="filter-options is-inline">
+          <button
+            class="chip"
+            :class="{ 'is-on': filters.status === 'all' }"
+            type="button"
+            :aria-pressed="filters.status === 'all'"
+            @click="setStatus(filters.status === 'all' ? 'open' : 'all')"
+          >
+            Include closed
+            <span class="chip-count">{{ formatCount(counts.status.all) }}</span>
+          </button>
         </div>
       </div>
     </aside>

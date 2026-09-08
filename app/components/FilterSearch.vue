@@ -83,11 +83,8 @@ function placeList() {
   const preferred = list ? fiveRowHeight(list) : 140
   const flip = spaceBelow < preferred && spaceAbove > spaceBelow
   const maxHeight = Math.min(preferred, Math.max(72, flip ? spaceAbove : spaceBelow))
-  const mobile = window.innerWidth <= 800
-  const width = mobile
-    ? Math.min(window.innerWidth - 24, Math.max(rect.width, 200))
-    : Math.min(288, Math.max(rect.width, 232))
-  const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8)
+  const width = rect.width
+  const left = rect.left
   let top = rect.bottom + 4
   if (flip) {
     top = Math.max(8, rect.top - maxHeight - 4)

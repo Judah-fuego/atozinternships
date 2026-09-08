@@ -22,8 +22,14 @@
  *   node scripts/scrape-internships.mjs --enrich-summaries
  *   node scripts/scrape-internships.mjs --summaries-only
  *   node scripts/scrape-internships.mjs --enrich-summaries --force
- *   node scripts/scrape-internships.mjs --check-links
+ *   node scripts/scrape-internships.mjs --skip-check-links
  *   node scripts/scrape-internships.mjs --company-only
+ *
+ * Full scrapes prune clearly-dead apply URLs by default (Ashby / Greenhouse /
+ * Lever / Workday APIs + closed-job page text). Pass --skip-check-links to
+ * skip that pass. --check-links is accepted as a no-op alias for older docs.
+ * Listings whose published application deadline is before today (UTC) are
+ * dropped before write.
  *
  * USAJobs needs USAJOBS_API_KEY + USAJOBS_EMAIL (https://developer.usajobs.gov/).
  * If those are missing, GitHub + biotech snapshots still refresh.
@@ -980,6 +986,29 @@ function isPastIsoDate(value) {
     return false
   }
   return Date.parse(`${iso}T23:59:59Z`) < Date.now() - 86_400_000
+}
+
+/** True when the deadline calendar day is fully behind UTC today. */
+function isExpiredDeadline(value) {
+  const iso = isoDateOnly(value)
+  if (!iso) {
+    return false
+  }
+  return iso < new Date().toISOString().slice(0, 10)
+}
+
+function dropPastDeadlineListings(listings) {
+  const kept = []
+  const dropped = []
+  for (const item of listings || []) {
+    if (item?.deadline && isExpiredDeadline(item.deadline)) {
+      dropped.push(item)
+    }
+    else {
+      kept.push(item)
+    }
+  }
+  return { listings: kept, dropped }
 }
 
 function usaJobsCategoryCodes(descriptor) {
@@ -2890,6 +2919,13 @@ function enrichExistingSummariesOnly() {
       force: process.argv.includes('--force'),
       persist,
     })
+    const prunedDeadlines = dropPastDeadlineListings(raw.listings)
+    raw.listings = prunedDeadlines.listings
+    raw.count = raw.listings.length
+    raw.openCount = raw.listings.filter((item) => !item.closed).length
+    if (prunedDeadlines.dropped.length) {
+      process.stdout.write(`Dropped ${prunedDeadlines.dropped.length} past-deadline listings\n`)
+    }
     const withSummary = raw.listings.filter((item) => item.summary).length
     const withKeywords = raw.listings.filter((item) => item.keywords).length
     const withPay = raw.listings.filter((item) => item.payText || item.payMin != null).length
@@ -2962,10 +2998,15 @@ async function main() {
     process.stdout.write('Fetching official company career boards…\n')
     const existingAsOf = existsSync(OUT) ? statSync(OUT).mtime : new Date()
     const company = await fetchCompanyInternships()
-    const listings = withPostedAt(
+    let listings = withPostedAt(
       mergeListings(withPostedAt(raw.listings || [], existingAsOf), withPostedAt(company)),
       new Date(),
     ).filter((item) => isSpecificPostingUrl(item.url))
+    const prunedDeadlines = dropPastDeadlineListings(listings)
+    if (prunedDeadlines.dropped.length) {
+      process.stdout.write(`Dropped ${prunedDeadlines.dropped.length} past-deadline listings\n`)
+    }
+    listings = prunedDeadlines.listings
     const openCount = listings.filter((item) => !item.closed).length
     const payload = {
       ...raw,
@@ -3006,7 +3047,8 @@ async function main() {
   let listings = withPostedAt(
     mergeListings(vansh, simplify, jobright, zapply, usajobs, biotech, yc, idealist, company),
   ).filter((item) => isSpecificPostingUrl(item.url))
-  if (process.argv.includes('--check-links')) {
+  const skipCheckLinks = process.argv.includes('--skip-check-links')
+  if (!skipCheckLinks) {
     process.stdout.write(`Checking ${listings.length} apply links…\n`)
     const pruned = await pruneDeadInternshipListings(listings, {
       onProgress(done, total) {
@@ -3021,6 +3063,9 @@ async function main() {
       + `  dead reasons ${JSON.stringify(pruned.reasons)}\n`,
     )
     listings = pruned.listings
+  }
+  else {
+    process.stdout.write('Skipping apply-link prune (--skip-check-links)\n')
   }
 
   process.stdout.write('Enriching truncated role titles from apply pages…\n')
@@ -3040,7 +3085,14 @@ async function main() {
 
   await writeSummaryProgress('Enriching posting summaries from official apply pages…', listings)
 
+  const prunedDeadlines = dropPastDeadlineListings(listings)
+  if (prunedDeadlines.dropped.length) {
+    process.stdout.write(`Dropped ${prunedDeadlines.dropped.length} past-deadline listings\n`)
+  }
+  listings = prunedDeadlines.listings
+
   const openCount = listings.filter((item) => !item.closed).length
+  const withDeadline = listings.filter((item) => item.deadline).length
   const tracks = listings.reduce((counts, item) => {
     counts[item.track] = (counts[item.track] || 0) + 1
     return counts
@@ -3074,6 +3126,7 @@ async function main() {
     `Wrote ${listings.length} internships (${openCount} open) to ${OUT}\n`
     + `  vansh ${vansh.length} · simplify ${simplify.length} · jobright ${jobright.length} · zapply ${zapply.length}`
     + ` · usajobs ${usajobs.length} · biotech ${biotech.length} · yc ${yc.length} · idealist ${idealist.length} · company ${company.length}\n`
+    + `  deadlines ${withDeadline}/${listings.length}\n`
     + `  tracks ${JSON.stringify(tracks)}\n`,
   )
 }

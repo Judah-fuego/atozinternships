@@ -189,23 +189,25 @@ function toggleSelecting() {
     />
     <div class="browse-main">
       <div class="browse-top">
-        <button
-          class="filter-launch"
-          type="button"
-          @click="filtersOpen = true"
-        >
-          Filters
-          <span
-            v-if="filterCount"
-            class="filter-launch-count"
-          >{{ filterCount }}</span>
-        </button>
         <div class="browse-search">
           <BrowseSearch
             :model-value="filters.query ?? ''"
             placeholder="Company, role, Java, Python…"
             @update:model-value="filters = { ...filters, query: $event }"
           />
+          <button
+            class="filter-launch"
+            type="button"
+            :aria-expanded="filtersOpen"
+            aria-haspopup="dialog"
+            @click="filtersOpen = true"
+          >
+            Filters
+            <span
+              v-if="filterCount"
+              class="filter-launch-count"
+            >{{ filterCount }}</span>
+          </button>
           <div class="count">
             <template v-if="selecting">
               {{ selectedCount }} selected
@@ -259,9 +261,15 @@ function toggleSelecting() {
       </div>
       <div
         v-if="!listings.length"
-        class="notice"
+        class="browse-loading"
+        role="status"
+        aria-live="polite"
+        aria-label="Loading listings"
       >
-        Loading listings…
+        <span
+          class="browse-spinner"
+          aria-hidden="true"
+        />
       </div>
       <div
         v-else

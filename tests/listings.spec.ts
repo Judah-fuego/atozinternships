@@ -26,7 +26,7 @@ import {
   visaLabel,
   type Internship,
 } from '../app/data/listings'
-import { extractKeywords, extractPay, extractRequirements, extractDeadline, extractInternshipTerm, isWeakSummary, parseApplyTarget, parseDeadlineDate, postingFields, summarizePosting } from '../scripts/job-summary.mjs'
+import { extractKeywords, extractPay, extractRequirements, extractDeadline, extractInternshipTerm, isWeakSummary, parseApplyTarget, parseDeadlineDate, postingFields, summarizePosting, textFromHtml } from '../scripts/job-summary.mjs'
 import { companyInternshipBoards, internshipBoardForCompany, isSpecificPostingUrl } from '../scripts/apply-url.mjs'
 import { adpRecruitmentRef, ashbyJobListed, ashbyUnavailable } from '../scripts/check-internship-links.mjs'
 
@@ -541,6 +541,86 @@ What You Bring
 
   it('drops view-our-opening filler instead of keeping it as the description', () => {
     expect(summarizePosting('View our opening for Software Engineer Intern - 2027 Summer and learn more about what it\'s like to work at TikTok!')).toBe('')
+  })
+
+  it('prefers TikTok-style Key Responsibilities dash bullets over soft you-will fluff', () => {
+    const text = `
+      Frontend Software Engineer Intern (Ads Measurement Signal and Privacy) - 2027 Summer
+      Responsibilities
+      Our Ads Measurement Signal and Privacy team is missioned to build security infrastructure.
+      You will be a key player in data privacy, protection, security and managing cross-functional programs.
+      Key Responsibilities:
+      - Build various products to handle signal integration, management and insights through both building in-house TT cutting edge solutions and dealing with many third-party data partners integrations.
+      - Design, build and maintain scalable and future-proof tech foundations to manage data collection and data quality.
+      - Work with cross-functional teams (inc. product, data scientist, UX, compliance) to continuously improve comprehensive measurement.
+      Qualifications
+      Minimum Qualifications:
+      - Currently pursuing an Undergraduate/Master's in Computer Science.
+      - Strong knowledge of data structures and algorithms, proficient in Go, Javascript, Java, C++.
+    `
+    const summary = summarizePosting(text)
+    expect(summary).toMatch(/build various products to handle signal integration/i)
+    expect(summary).toMatch(/design, build and maintain scalable/i)
+    expect(summary).toMatch(/cross-functional teams/i)
+    expect(summary).not.toMatch(/view our opening/i)
+    expect(summary).not.toMatch(/key player in data privacy/i)
+    expect(extractKeywords(text)).toMatch(/Java/)
+  })
+
+  it('falls back to SSR page body when og:description is view-our-opening fluff', () => {
+    const html = `<!DOCTYPE html><html><head>
+      <meta property="og:description" content="View our opening for Frontend Software Engineer Intern and learn more about what it's like to work at TikTok!">
+    </head><body>
+      <h1>Frontend Software Engineer Intern</h1>
+      <p>Responsibilities</p>
+      <p>Key Responsibilities:</p>
+      <ul>
+        <li>Build various products to handle signal integration.</li>
+        <li>Design, build and maintain scalable foundations.</li>
+      </ul>
+      <p>Qualifications</p>
+      <p>Currently pursuing Computer Science.</p>
+    </body></html>`
+    const extracted = textFromHtml(html)
+    expect(extracted).toMatch(/Build various products/i)
+    expect(extracted).not.toMatch(/View our opening/i)
+    const summary = summarizePosting(extracted)
+    expect(summary).toMatch(/build various products/i)
+    expect(summary).toMatch(/design, build and maintain/i)
+  })
+
+  it('keeps Responsibilities may include bullets like Qorvo RFIC postings', () => {
+    const text = `
+      RFIC Design Engineer Intern
+      Responsibilities may include:
+      • Specify, design, analyze and simulate RF and analog/mixed-signal electronic integrated circuits.
+      • Implement RF blocks such as Power Amplifiers, LNAs, RF Switches in silicon technologies.
+      • Calculate and simulate the effects of various parasitics using Electro-Magnetic simulation tools.
+      Qualifications
+      • Currently enrolled in a Bachelor's in Electrical Engineering.
+    `
+    const summary = summarizePosting(text)
+    expect(summary).toMatch(/specify, design, analyze and simulate/i)
+    expect(summary).toMatch(/implement rf blocks/i)
+    expect(summary).toMatch(/calculate and simulate/i)
+    expect(summary).not.toMatch(/currently enrolled/i)
+  })
+
+  it('uses opportunity copy when a posting has no concrete duty bullets', () => {
+    const text = `
+      The Opportunity:
+      The Summer Games is an innovative internship program that attracts some of the nation's best and brightest students. The goal is to develop a breakthrough idea or solution for one of our customer's most pressing, complex, and multidimensional problems while developing valuable technical skills. Simulating a real-world startup accelerator environment, the interns are divided into teams, each working on a different challenge project.
+      You Have:
+      • Experience with programming languages, including Python
+      • Scheduled to obtain a Bachelor's degree by Summer 2028
+      Compensation
+      The projected compensation range for this position is $52,900.00 to $108,000.00.
+    `
+    const summary = summarizePosting(text)
+    expect(summary).toMatch(/summer games|breakthrough idea|challenge project/i)
+    expect(summary).not.toMatch(/compensation|52,900/i)
+    expect(summary).not.toMatch(/experience with programming/i)
+    expect(isWeakSummary(summary)).toBe(false)
   })
 
   it('skips internship-credit and company-about boilerplate', () => {
